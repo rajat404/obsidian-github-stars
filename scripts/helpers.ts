@@ -7,7 +7,6 @@ import {
     packageFile,
     targetJavaScriptFile,
     targetStylesFile,
-    versionsFile,
 } from "./common";
 import { Code, ScriptError } from "./errors";
 
@@ -117,28 +116,6 @@ export function updateManifestFile(
         .andThen(() => ok({ targetVersion, minAppVersion }))
         .orElse((error) =>
             err(new ScriptError(Code.FileSystem.UnableToUpdateManifestFile)),
-        );
-}
-
-export function updateVersionsFile(
-    targetVersion: string,
-    minAppVersion: string,
-) {
-    console.log("Update versions file");
-    return createFileIfNotExists(versionsFile, "{}")
-        .andThen(() =>
-            readJsonFile<{ [version: string]: string }>(versionsFile),
-        )
-        .andThen((versions) => {
-            versions[targetVersion] = minAppVersion;
-            return writeFile(
-                versionsFile,
-                JSON.stringify(versions, null, "\t"),
-            );
-        })
-        .andThen(() => ok({ targetVersion, minAppVersion }))
-        .orElse((error) =>
-            err(new ScriptError(Code.FileSystem.UnableToUpdateVersionsFile)),
         );
 }
 

@@ -27,12 +27,6 @@ dev: check
 debug: check
     bun ./scripts/build.ts --dev --no-minify --source-maps
 
-bump-version:
-    bun ./scripts/bump-version.ts
-
-release: bump-version
-    bun ./scripts/release.ts
-
 
 # Local
 
@@ -53,6 +47,6 @@ install-deps-failed:
 
 [private]
 install-deps-mac:
-    brew install bun git-cliff
+    brew install bun
     cargo install grass
     bun install

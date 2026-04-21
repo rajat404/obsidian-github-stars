@@ -90,7 +90,7 @@ To generate a fine grained access token, follow these steps:
 
 You have two options to install this plugin:
 1. ~~Install this plugin from community plugin list in Obsidian. NB only after [this PR](https://github.com/obsidianmd/obsidian-releases/pull/5602) will be merged.~~. This plugin will be never in community plugin list.
-2. Use [BRAT][BRAT] plugin to use this plugin version directly from [GitHub](https://github.com/vovanbo/obsidian-github-stars/releases).
+2. Use [BRAT][BRAT] to install the plugin directly from this GitHub repository.
 
 ### Usage
 
@@ -218,7 +218,6 @@ That log includes:
 - [neverthrow][neverthrow] (unified error handling and result types)
 - [luxon][luxon] (date and time library)
 - [Biome][Biome] (lint, format, etc)
-- [git-cliff][git-cliff] (bump versions and change log generation)
 
 ### Notes about this fork
 
@@ -242,5 +241,4 @@ That log includes:
 [neverthrow]: https://github.com/softprops/neverthrow
 [luxon]: https://moment.github.io/luxon/
 [Handlebars]: https://handlebarsjs.com
-[git-cliff]: https://git-cliff.org/
 [BRAT]: https://github.com/TfTHacker/obsidian42-brat
