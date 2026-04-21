@@ -1,9 +1,9 @@
 {
     "id": "github-stars",
     "name": "GitHub stars",
-    "version": "0.5.3",
+    "version": "0.5.3-rajat.1",
     "minAppVersion": "1.5.7",
-    "description": "Fetch your GitHub stars and create documents in your vault.",
+    "description": "Custom fork: sync GitHub stars into Obsidian with README import.",
     "author": "Vladimir Bolshakov",
     "authorUrl": "https://github.com/vovanbo",
     "isDesktopOnly": true
