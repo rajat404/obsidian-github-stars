@@ -30,6 +30,7 @@ This plugin for [Obsidian][Obsidian] imports your GitHub stars into your vault a
 ## Features
 
 - Create document for each starred repository
+- Include the repository README in each generated repository page when available
 - Each repository document's FrontMatter has properties:
   - URL
   - Homepage URL
@@ -127,6 +128,7 @@ That exactly will be placed inside tags you can see in the demo video above. In 
 - Name of repository
 - URL to repository
 - Description of repository (if available)
+- README content (if available)
 - Homepage URL
 - URL to repository owner page on GitHub
 - Information about latest release if available
@@ -141,10 +143,6 @@ Each repository Markdown page will have the following frontmatter:
 ---
 url: <repository URL>
 homepageUrl: <homepage URL>
-isArchived: <boolean>
-isFork: <boolean>
-isPrivate: <boolean>
-isTemplate: <boolean>
 stargazerCount: <number>
 forkCount: <number>
 createdAt: <date>
@@ -173,7 +171,7 @@ Documentation will be updated soon.
     - [ ] Show statistics
     - [ ] Show ratings
 - [ ] i18n / l10n
-- [ ] Fetch README file content on a starred repository page
+- [x] Fetch README file content on a starred repository page
 - [ ] Global changes log
 - [ ] Highlight archived, deprecated and unmaintained repositories
 - [ ] Customizable templates of pages

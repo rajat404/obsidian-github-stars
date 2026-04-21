@@ -302,10 +302,14 @@ export class GithubStarsPluginApi {
                     // biome-ignore lint/performance/noDelete: FrontMatter mutation
                     delete frontmatter.homepageUrl;
                 }
-                frontmatter.isArchived = repo.isArchived;
-                frontmatter.isFork = repo.isFork;
-                frontmatter.isPrivate = repo.isPrivate;
-                frontmatter.isTemplate = repo.isTemplate;
+                // biome-ignore lint/performance/noDelete: FrontMatter mutation
+                delete frontmatter.isArchived;
+                // biome-ignore lint/performance/noDelete: FrontMatter mutation
+                delete frontmatter.isFork;
+                // biome-ignore lint/performance/noDelete: FrontMatter mutation
+                delete frontmatter.isPrivate;
+                // biome-ignore lint/performance/noDelete: FrontMatter mutation
+                delete frontmatter.isTemplate;
                 frontmatter.stargazerCount = repo.stargazerCount;
                 frontmatter.forkCount = repo.forkCount;
                 frontmatter.createdAt = repo.createdAt?.toISODate();
