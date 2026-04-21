@@ -2,6 +2,7 @@ import { GithubStarsPluginApi } from "@/api";
 import { SqliteDatabase } from "@/db/sqlite";
 import { Code, PluginError } from "@/errors";
 import { isEmpty, isMatch, isNull, isUndefined } from "@/helpers";
+import { configureLogger, logError, logInfo, resetDebugLog } from "@/logger";
 import { confirm } from "@/modals";
 import { GithubRepositoriesService } from "@/services/github";
 import { DEFAULT_SETTINGS, type PluginSettings, SettingsTab } from "@/settings";
@@ -58,6 +59,7 @@ export default class GithubStarsPlugin extends Plugin {
 
     override async onload(): Promise<void> {
         await this.loadSettings();
+        configureLogger(this.app.vault.adapter);
         this.addSettingTab(new SettingsTab(this.app, this));
         this.registerHandlebarsHelpers();
         this.statusBar = new StatusBar(this.addStatusBarItem());
@@ -100,6 +102,14 @@ export default class GithubStarsPlugin extends Plugin {
                     }
                 }
 
+                await resetDebugLog("sync command started");
+                logInfo("sync configuration resolved", {
+                    fullSync: config.fullSync,
+                    removeUnstarred: config.removeUnstarred,
+                    hasLastRepoId: !isUndefined(config.lastRepoId),
+                    pageSize: this.settings.pageSize,
+                    destinationFolder: this.settings.destinationFolder,
+                });
                 const result = await this.lock.run(() => {
                     const doImportDataToStorage = ResultAsync.fromPromise(
                         this.importDataToStorage(config),
@@ -123,9 +133,27 @@ export default class GithubStarsPlugin extends Plugin {
                         .andThen((repos) => this.createOrUpdatePages(repos))
                         .andTee(() => this.updateStats())
                         .andThrough(() => this.storage.close())
-                        .orTee((error) => error.log().notice());
+                        .orTee((error) => {
+                            logError("sync pipeline failed", {
+                                code: error.code,
+                                name: error.name,
+                                message: error.message,
+                            });
+                            return error.log().notice();
+                        });
                 });
-                return result.orTee((error) => error.log().notice());
+                return result
+                    .andTee(() =>
+                        logInfo("sync command completed successfully"),
+                    )
+                    .orTee((error) => {
+                        logError("sync command failed", {
+                            code: error.code,
+                            name: error.name,
+                            message: error.message,
+                        });
+                        return error.log().notice();
+                    });
             },
         });
 
@@ -231,9 +259,20 @@ export default class GithubStarsPlugin extends Plugin {
         PluginStorage,
         PluginError<Code.Vault> | PluginError<Code.Storage>
     > {
+        logInfo("prepareStorage start", {
+            dbFolder: this.dbFolder,
+            dbFileName: this.settings.dbFileName,
+        });
         return getOrCreateFolder(this.app.vault, this.dbFolder).andThen(
             (dbFolder) =>
-                this.storage.init(dbFolder.path, this.settings.dbFileName),
+                this.storage
+                    .init(dbFolder.path, this.settings.dbFileName)
+                    .andTee(() =>
+                        logInfo("prepareStorage finished", {
+                            dbFolder: dbFolder.path,
+                            dbFileName: this.settings.dbFileName,
+                        }),
+                    ),
         );
     }
 
@@ -243,14 +282,23 @@ export default class GithubStarsPlugin extends Plugin {
         const service = new GithubRepositoriesService(
             this.settings.accessToken,
         );
+        logInfo("importDataToStorage start", {
+            hasAccessToken: Boolean(this.settings.accessToken),
+            pageSize: this.settings.pageSize,
+            fullSync: config.fullSync,
+        });
         const totalCountResult =
             await service.getTotalStarredRepositoriesCount();
 
         if (totalCountResult.isErr()) {
+            logError("failed to fetch total starred repositories count", {
+                code: totalCountResult.error.code,
+            });
             return err(totalCountResult.error);
         }
 
         const totalCount = totalCountResult.value;
+        logInfo("fetched total starred repositories count", { totalCount });
         new Notice(
             `Start import of ${totalCount} GitHub stars (page size is ${this.settings.pageSize} items)…`,
         );
@@ -281,12 +329,18 @@ export default class GithubStarsPlugin extends Plugin {
         if (result.isOk()) {
             new Notice("Import of your GitHub stars was successful!");
             statusBarAction.done();
+            logInfo("importDataToStorage completed", { totalCount });
         } else {
             new Notice(
                 "ERROR. Import of your GitHub starred repositories was failed!",
                 0,
             );
             statusBarAction.failed();
+            logError("importDataToStorage failed", {
+                code: result.error.code,
+                name: result.error.name,
+                message: result.error.message,
+            });
         }
         return result;
     }
@@ -309,6 +363,7 @@ export default class GithubStarsPlugin extends Plugin {
     }
 
     private createOrUpdatePages(repos: GitHub.Repository[]) {
+        logInfo("createOrUpdatePages start", { repositoryCount: repos.length });
         new Notice("Creation of pages for your GitHub stars was started…");
 
         const total = repos.length;
@@ -401,7 +456,19 @@ export default class GithubStarsPlugin extends Plugin {
                 .orTee(() => statusBarActions.indexByOwners.stop().failed()),
         ])
             .andThen(() => ok())
-            .orTee((error) => error.log().notice());
+            .andTee(() =>
+                logInfo("createOrUpdatePages completed", {
+                    repositoryCount: repos.length,
+                }),
+            )
+            .orTee((error) => {
+                logError("createOrUpdatePages failed", {
+                    code: error.code,
+                    name: error.name,
+                    message: error.message,
+                });
+                return error.log().notice();
+            });
     }
 
     private removeUnstarredRepositories(

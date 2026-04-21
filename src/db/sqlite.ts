@@ -1,6 +1,7 @@
 import sqlWasm from "!/sql.js/dist/sql-wasm.wasm";
 import { Code, PluginError } from "@/errors";
 import { isUndefined } from "@/helpers";
+import { logError, logInfo } from "@/logger";
 import {
     type Result,
     ResultAsync,
@@ -83,14 +84,25 @@ export class SqliteDatabase {
 
         this.dbFolder = dbFolder;
         this.dbFile = dbFile;
+        logInfo("sqlite init start", {
+            dbFolder,
+            dbFile,
+        });
         return this.getOrCreateDbInstance()
             .andThen((db) => {
                 this.db = db;
+                logInfo("sqlite init opened database", {
+                    dbFilePath: this.dbFilePath,
+                });
                 return ok(db);
             })
             .andThrough(() => this.save())
             .orElse((error) => {
                 this.db = undefined;
+                logError("sqlite init failed", {
+                    code: error.code,
+                    dbFilePath: this.dbFilePath,
+                });
                 return err(error);
             });
     }
@@ -113,7 +125,15 @@ export class SqliteDatabase {
 
         return this.instance
             .map((db) => db.export().buffer as ArrayBuffer)
-            .asyncAndThen((data) => saveDbData(this.dbFilePath, data));
+            .asyncAndThen((data) =>
+                saveDbData(this.dbFilePath, data).orElse((error) => {
+                    logError("sqlite save failed", {
+                        code: error.code,
+                        dbFilePath: this.dbFilePath,
+                    });
+                    return errAsync(error);
+                }),
+            );
     }
 
     public migrate() {

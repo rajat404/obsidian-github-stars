@@ -14,6 +14,7 @@ import removeUnstarredRepositoriesQuery from "@/db/queries/removeUnstarredReposi
 import schemaQuery from "@/db/queries/schema.sql";
 import type { SqliteDatabase } from "@/db/sqlite";
 import { Code, PluginError } from "@/errors";
+import { logError, logInfo, logWarn } from "@/logger";
 import type { StarredRepositoriesGenerator } from "@/services/github";
 import { DEFAULT_STATS } from "@/settings";
 import type { GitHub } from "@/types";
@@ -65,14 +66,20 @@ export class PluginStorage {
             .init(dbFolder, dbFile)
             .andThen((db) => {
                 try {
+                    logInfo("storage init start", { dbFolder, dbFile });
                     db.run("BEGIN TRANSACTION;");
                     db.run(schemaQuery);
                     this.ensureRepositoriesSchema(db);
                     db.run("COMMIT;");
+                    logInfo("storage init schema ready", { dbFolder, dbFile });
                     return okAsync(db);
                 } catch (e) {
                     db.run("ROLLBACK;");
-                    console.error(`Database error: ${e}`);
+                    logError("storage init schema failed", {
+                        dbFolder,
+                        dbFile,
+                        error: String(e),
+                    });
                     return errAsync(
                         new PluginError(Code.Storage.SchemaCreationFailed),
                     );
@@ -81,7 +88,11 @@ export class PluginStorage {
             .andThrough(() => this.db.save())
             .andThen(() => ok(this))
             .orElse((error) => {
-                console.error(`ERROR. ${error}`);
+                logError("storage init failed", {
+                    code: error.code,
+                    dbFolder,
+                    dbFile,
+                });
                 this.close();
                 return errAsync(
                     new PluginError(Code.Storage.InitializationFailed),
@@ -146,13 +157,21 @@ export class PluginStorage {
 
         const now = DateTime.utc();
         const importedReposIds: Set<string> = new Set();
+        let readmeFetchFailures = 0;
 
         let result: Result<void, PluginError<Code.Any>> = ok();
         let stopImport = false;
         try {
+            logInfo("storage import transaction start", {
+                fullSync: config.fullSync,
+                hasLastRepoId: Boolean(config.lastRepoId),
+            });
             db.run("BEGIN TRANSACTION;");
             for await (const partResult of repositoriesGen) {
                 if (partResult.isErr()) {
+                    logError("storage import page fetch failed", {
+                        code: partResult.error.code,
+                    });
                     result = err(partResult.error);
                     break;
                 }
@@ -164,6 +183,14 @@ export class PluginStorage {
                     }
 
                     progressCallback(importedReposIds.size);
+                    if (
+                        importedReposIds.size > 0 &&
+                        importedReposIds.size % 100 === 0
+                    ) {
+                        logInfo("storage import progress", {
+                            importedCount: importedReposIds.size,
+                        });
+                    }
 
                     const repo = deserializationResult.value;
                     let readme: string | null = null;
@@ -190,11 +217,11 @@ export class PluginStorage {
                                 readmeFetchedAt = now.toISO();
                             }
                         } else {
-                            console.error(
-                                "Unable to fetch README for repository:",
-                                repo.url.toString(),
-                                readmeResult.error,
-                            );
+                            readmeFetchFailures += 1;
+                            logWarn("README fetch failed for repository", {
+                                repository: repo.url.toString(),
+                                code: readmeResult.error.code,
+                            });
                         }
                     }
 
@@ -318,12 +345,25 @@ export class PluginStorage {
                 }
 
                 db.run("COMMIT;");
+                logInfo("storage import transaction committed", {
+                    importedCount: importedReposIds.size,
+                    readmeFetchFailures,
+                });
             } else {
                 db.run("ROLLBACK;");
+                logError("storage import rolled back", {
+                    code: result.error.code,
+                    importedCount: importedReposIds.size,
+                    readmeFetchFailures,
+                });
             }
         } catch (error) {
             db.run("ROLLBACK;");
-            console.error("Import transaction failed: ", error);
+            logError("storage import threw", {
+                error: String(error),
+                importedCount: importedReposIds.size,
+                readmeFetchFailures,
+            });
             result = err(new PluginError(Code.Storage.ImportFailed));
         } finally {
             licensesStmt.free();
