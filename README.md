@@ -6,6 +6,17 @@ This plugin for [Obsidian][Obsidian] imports your GitHub stars into your vault a
 - Have a index of your starred repositories grouped by programming languages
 - Have a index grouped by owners of your starred repos
 
+## Fork status
+
+This repository is a fork of [`vovanbo/obsidian-github-stars`](https://github.com/vovanbo/obsidian-github-stars).
+
+Current fork-specific changes:
+- Include repository `README` content in generated repository notes
+- Hide `isArchived`, `isFork`, `isPrivate`, and `isTemplate` from note frontmatter while still retaining them in plugin storage
+- Use Obsidian's native `requestUrl` HTTP transport for GitHub API calls instead of browser fetch, which avoids desktop CORS failures
+- Retry transient GitHub API failures (`429`, `500`, `502`, `503`, `504`) during sync
+- Write durable sync diagnostics to `.obsidian/plugins/github-stars/debug.log`
+
 ## Table of contents
 
 - [Demo](#demo)
@@ -31,6 +42,9 @@ This plugin for [Obsidian][Obsidian] imports your GitHub stars into your vault a
 
 - Create document for each starred repository
 - Include the repository README in each generated repository page when available
+- Use Obsidian-native HTTP requests for GitHub API calls
+- Retry transient GitHub API failures during sync
+- Write a persistent debug log for sync troubleshooting
 - Each repository document's FrontMatter has properties:
   - URL
   - Homepage URL
@@ -61,7 +75,9 @@ To generate a fine grained access token, follow these steps:
 3. Confirm access if you have two-factor authentication enabled.
 4. Give your token a name.
 5. Setup expiration date (and optionally description).
-6. Select read-only access to "Starring" (see "Account permissions" settings).
+6. Select read-only access to:
+   - `Starring`
+   - `Contents`
 7. Click on "Generate token".
 8. Copy generated token value and paste it into the plugin settings after plugin will be installed.
 
@@ -162,6 +178,21 @@ Documentation will be updated soon.
 
 Documentation will be updated soon.
 
+#### Debug logging
+
+This fork writes sync diagnostics to:
+
+```text
+.obsidian/plugins/github-stars/debug.log
+```
+
+That log includes:
+- sync lifecycle start/finish
+- storage initialization
+- import progress in `100`-repo steps
+- GitHub retry scheduling on transient failures
+- final import/page-generation success or failure
+
 ## Roadmap to 1.0
 
 - [x] Automatically remove files related to removed stars
@@ -183,12 +214,18 @@ Documentation will be updated soon.
 
 - [Bun][Bun] (TypeScript, build, WASM binary import)
 - [SQL.js][SQL.js] (SQLite in browser via WASM)
-- [octokit.js][octokit.js] (API client for GitHub)
 - [Handlebars][Handlebars] (Templates for pages)
 - [neverthrow][neverthrow] (unified error handling and result types)
 - [luxon][luxon] (date and time library)
 - [Biome][Biome] (lint, format, etc)
 - [git-cliff][git-cliff] (bump versions and change log generation)
+
+### Notes about this fork
+
+- GitHub API requests currently use Obsidian `requestUrl`, not `octokit`
+- README fetch is limited to the repository root README returned by the GitHub `readme` endpoint
+- Relative links and images inside imported READMEs are not rewritten yet
+- Private repositories are still imported if the GitHub token can see them; this is not yet filtered out globally
 
 ## Inspiration sources
 
