@@ -89,7 +89,7 @@ export async function showModal<T>(
     modalCreator: (resolve: PromiseResolve<T>) => Modal,
 ): Promise<T> {
     return await new Promise<T>((resolve) => {
-        const modal = modalCreator(resolve);
+        const modal = modalCreator(resolve as PromiseResolve<T>);
         modal.open();
     });
 }
