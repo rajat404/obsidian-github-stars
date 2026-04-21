@@ -274,6 +274,8 @@ export default class GithubStarsPlugin extends Plugin {
                     );
                 }
             },
+            async (repo) =>
+                await service.getRepositoryReadme(repo.owner.login, repo.name),
         );
 
         if (result.isOk()) {

@@ -2,6 +2,7 @@ INSERT INTO repositories (
     id,
     name,
     description,
+    readme,
     url,
     homepageUrl,
     owner,
@@ -15,6 +16,7 @@ INSERT INTO repositories (
     forkCount,
     createdAt,
     pushedAt,
+    readmeFetchedAt,
     starredAt,
     updatedAt,
     importedAt,
@@ -25,6 +27,7 @@ VALUES (
     $id,
     $name,
     $description,
+    $readme,
     $url,
     $homepageUrl,
     $owner,
@@ -38,6 +41,7 @@ VALUES (
     $forkCount,
     $createdAt,
     $pushedAt,
+    $readmeFetchedAt,
     $starredAt,
     $updatedAt,
     $importedAt,
@@ -46,6 +50,10 @@ VALUES (
   ) ON CONFLICT (id) DO
 UPDATE
 SET description = excluded.description,
+  readme = CASE
+    WHEN $readmeUpdateMode = 'skip' THEN repositories.readme
+    ELSE excluded.readme
+  END,
   homepageUrl = excluded.homepageUrl,
   isArchived = excluded.isArchived,
   isFork = excluded.isFork,
@@ -57,6 +65,10 @@ SET description = excluded.description,
   forkCount = excluded.forkCount,
   createdAt = excluded.createdAt,
   pushedAt = excluded.pushedAt,
+  readmeFetchedAt = CASE
+    WHEN $readmeUpdateMode = 'skip' THEN repositories.readmeFetchedAt
+    ELSE excluded.readmeFetchedAt
+  END,
   starredAt = excluded.starredAt,
   updatedAt = excluded.updatedAt,
   unstarredAt = NULL,

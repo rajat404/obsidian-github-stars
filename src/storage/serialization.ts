@@ -115,6 +115,7 @@ export function fromDbObject(
             description: row.description
                 ? (row.description as string).trim()
                 : undefined,
+            readme: row.readme ? (row.readme as string) : undefined,
             url: new URL(row.url as string),
             homepageUrl: row.homepageUrl
                 ? new URL(row.homepageUrl as string)
@@ -155,6 +156,9 @@ export function fromDbObject(
             forkCount: row.forkCount as number,
             createdAt: DateTime.fromISO(row.createdAt as string).toUTC(),
             pushedAt: DateTime.fromISO(row.pushedAt as string).toUTC(),
+            readmeFetchedAt: row.readmeFetchedAt
+                ? DateTime.fromISO(row.readmeFetchedAt as string).toUTC()
+                : undefined,
             starredAt: DateTime.fromISO(row.starredAt as string).toUTC(),
             unstarredAt: row.unstarredAt
                 ? DateTime.fromISO(row.unstarredAt as string).toUTC()

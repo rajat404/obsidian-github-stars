@@ -4,7 +4,7 @@ import { retry } from "@octokit/plugin-retry";
 import { type Result, ResultAsync } from "neverthrow";
 import starredRepositoriesQuery from "./queries/starredRepositories.gql";
 import totalStarredRepositoriesCountQuery from "./queries/totalStarredRepositoriesCount.gql";
-import type { GitHubGraphQl } from "./types";
+import type { GitHubGraphQl, GitHubRest } from "./types";
 
 export interface StarredRepositoriesQueryResult {
     repositories: GitHubGraphQl.StarredRepositoryEdge[];
@@ -27,6 +27,10 @@ export interface IGithubRepositoriesService {
     client: Octokit;
 
     getUserStarredRepositories(pageSize: number): StarredRepositoriesGenerator;
+    getRepositoryReadme(
+        owner: string,
+        repo: string,
+    ): ResultAsync<string | undefined, PluginError<Code.GithubService>>;
 
     getTotalStarredRepositoriesCount(): ResultAsync<
         number,
@@ -37,12 +41,16 @@ export interface IGithubRepositoriesService {
 export class GithubRepositoriesService implements IGithubRepositoriesService {
     accessToken: string;
     client: Octokit;
+    publicClient: Octokit;
 
     constructor(accessToken: string) {
         this.accessToken = accessToken;
         const OctokitWithRetries = Octokit.plugin(retry);
         this.client = new OctokitWithRetries({
             auth: this.accessToken,
+            request: { retries: 1, retryAfter: 1 },
+        });
+        this.publicClient = new OctokitWithRetries({
             request: { retries: 1, retryAfter: 1 },
         });
     }
@@ -108,5 +116,53 @@ export class GithubRepositoriesService implements IGithubRepositoriesService {
             ),
             () => new PluginError(Code.GithubService.RequestFailed),
         ).map((response) => response.viewer.starredRepositories.totalCount);
+    }
+
+    public getRepositoryReadme(
+        owner: string,
+        repo: string,
+    ): ResultAsync<string | undefined, PluginError<Code.GithubService>> {
+        const request = (async () => {
+            try {
+                const response = await this.publicClient.request(
+                    "GET /repos/{owner}/{repo}/readme",
+                    {
+                        owner,
+                        repo,
+                        headers: {
+                            accept: "application/vnd.github+json",
+                        },
+                    },
+                );
+                const data = response.data as GitHubRest.ReadmeResponse;
+
+                if (!data.content) {
+                    return undefined;
+                }
+
+                if (data.encoding === "base64") {
+                    return Buffer.from(
+                        data.content.replaceAll("\n", ""),
+                        "base64",
+                    ).toString("utf-8");
+                }
+
+                return data.content;
+            } catch (error) {
+                if (
+                    error instanceof Error &&
+                    "status" in error &&
+                    error.status === 404
+                ) {
+                    return undefined;
+                }
+                throw error;
+            }
+        })();
+
+        return ResultAsync.fromPromise(
+            request,
+            () => new PluginError(Code.GithubService.RequestFailed),
+        );
     }
 }

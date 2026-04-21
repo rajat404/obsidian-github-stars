@@ -46,6 +46,10 @@ export type ImportConfig = {
     lastRepoId?: string;
 };
 
+export type RepositoryReadmeGetter = (
+    repo: GitHub.Repository,
+) => Promise<Result<string | undefined, PluginError<Code.GithubService>>>;
+
 export class PluginStorage {
     private db: SqliteDatabase;
 
@@ -63,6 +67,7 @@ export class PluginStorage {
                 try {
                     db.run("BEGIN TRANSACTION;");
                     db.run(schemaQuery);
+                    this.ensureRepositoriesSchema(db);
                     db.run("COMMIT;");
                     return okAsync(db);
                 } catch (e) {
@@ -84,6 +89,34 @@ export class PluginStorage {
             });
     }
 
+    private ensureRepositoriesSchema(db: {
+        exec: (sql: string) => { columns: string[]; values: unknown[][] }[];
+        run: (sql: string) => void;
+    }) {
+        const columns = new Set<string>();
+        const result = db.exec("PRAGMA table_info(repositories);");
+
+        if (result.length) {
+            const nameIndex = result[0].columns.indexOf("name");
+            for (const row of result[0].values) {
+                const name = row[nameIndex];
+                if (typeof name === "string") {
+                    columns.add(name);
+                }
+            }
+        }
+
+        if (!columns.has("readme")) {
+            db.run("ALTER TABLE repositories ADD COLUMN readme TEXT NULL;");
+        }
+
+        if (!columns.has("readmeFetchedAt")) {
+            db.run(
+                "ALTER TABLE repositories ADD COLUMN readmeFetchedAt datetime NULL;",
+            );
+        }
+    }
+
     public close(): ResultAsync<void, PluginError<Code.Sqlite>> {
         return this.db.close();
     }
@@ -92,6 +125,7 @@ export class PluginStorage {
         repositoriesGen: StarredRepositoriesGenerator,
         config: ImportConfig,
         progressCallback: (count: number) => void,
+        readmeGetter?: RepositoryReadmeGetter,
     ): Promise<Result<void, PluginError<Code.Any>>> {
         if (this.db.instance.isErr()) {
             return err(this.db.instance.error);
@@ -132,6 +166,9 @@ export class PluginStorage {
                     progressCallback(importedReposIds.size);
 
                     const repo = deserializationResult.value;
+                    let readme: string | null = null;
+                    let readmeFetchedAt: string | null = null;
+                    let readmeUpdateMode = "skip";
 
                     if (
                         !config.fullSync &&
@@ -140,6 +177,25 @@ export class PluginStorage {
                     ) {
                         stopImport = true;
                         break;
+                    }
+
+                    if (!repo.isPrivate && readmeGetter) {
+                        const readmeResult = await readmeGetter(repo);
+                        if (readmeResult.isOk()) {
+                            readmeUpdateMode = "set";
+                            repo.readme = readmeResult.value;
+                            if (readmeResult.value) {
+                                repo.readmeFetchedAt = now;
+                                readme = readmeResult.value;
+                                readmeFetchedAt = now.toISO();
+                            }
+                        } else {
+                            console.error(
+                                "Unable to fetch README for repository:",
+                                repo.url.toString(),
+                                readmeResult.error,
+                            );
+                        }
                     }
 
                     if (repo.licenseInfo?.spdxId) {
@@ -171,6 +227,7 @@ export class PluginStorage {
                         $description: repo.description
                             ? repo.description
                             : null,
+                        $readme: readme,
                         $url: repo.url.toString(),
                         $homepageUrl: repo.homepageUrl
                             ? repo.homepageUrl.toString()
@@ -194,6 +251,7 @@ export class PluginStorage {
                         $pushedAt: repo.pushedAt
                             ? repo.pushedAt.toUTC().toISO()
                             : null,
+                        $readmeFetchedAt: readmeFetchedAt,
                         $starredAt: repo.starredAt
                             ? repo.starredAt.toUTC().toISO()
                             : null,
@@ -207,6 +265,7 @@ export class PluginStorage {
                         $fundingLinks: repo.fundingLinks
                             ? JSON.stringify(repo.fundingLinks)
                             : null,
+                        $readmeUpdateMode: readmeUpdateMode,
                     });
                     repositoriesStmt.step();
 

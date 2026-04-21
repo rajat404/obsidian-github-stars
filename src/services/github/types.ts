@@ -98,3 +98,10 @@ export namespace GitHubGraphQl {
         viewer: AuthenticatedUserResponse;
     }
 }
+
+export namespace GitHubRest {
+    export interface ReadmeResponse {
+        content?: string;
+        encoding?: string;
+    }
+}

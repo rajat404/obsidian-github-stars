@@ -59,6 +59,7 @@ export namespace GitHub {
         public id!: string;
         public name!: string;
         public description?: string;
+        public readme?: string;
         public url!: URL;
         public homepageUrl?: URL;
         public owner!: Owner;
@@ -73,6 +74,7 @@ export namespace GitHub {
         public createdAt?: DateTime;
         public importedAt?: DateTime;
         public pushedAt?: DateTime;
+        public readmeFetchedAt?: DateTime;
         public starredAt?: DateTime;
         public unstarredAt?: DateTime = undefined;
         public updatedAt?: DateTime;
