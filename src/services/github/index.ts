@@ -41,16 +41,12 @@ export interface IGithubRepositoriesService {
 export class GithubRepositoriesService implements IGithubRepositoriesService {
     accessToken: string;
     client: Octokit;
-    publicClient: Octokit;
 
     constructor(accessToken: string) {
         this.accessToken = accessToken;
         const OctokitWithRetries = Octokit.plugin(retry);
         this.client = new OctokitWithRetries({
             auth: this.accessToken,
-            request: { retries: 1, retryAfter: 1 },
-        });
-        this.publicClient = new OctokitWithRetries({
             request: { retries: 1, retryAfter: 1 },
         });
     }
@@ -124,7 +120,7 @@ export class GithubRepositoriesService implements IGithubRepositoriesService {
     ): ResultAsync<string | undefined, PluginError<Code.GithubService>> {
         const request = (async () => {
             try {
-                const response = await this.publicClient.request(
+                const response = await this.client.request(
                     "GET /repos/{owner}/{repo}/readme",
                     {
                         owner,
