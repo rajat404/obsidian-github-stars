@@ -53,6 +53,6 @@ install-deps-failed:
 
 [private]
 install-deps-mac:
-    brew install bun wasm-pack git-cliff
+    brew install bun git-cliff
     cargo install grass
     bun install
