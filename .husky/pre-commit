@@ -1,1 +1,7 @@
+command -v gitleaks >/dev/null 2>&1 || {
+    echo "gitleaks CLI not found"
+    exit 1
+}
+
+gitleaks git --pre-commit --staged --no-banner --redact
 bunx lint-staged
