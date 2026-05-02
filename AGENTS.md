@@ -6,13 +6,16 @@ This repository is a fork of `vovanbo/obsidian-github-stars`.
 
 Primary fork goals:
 - sync GitHub stars into Obsidian
-- include repository README content in repo notes
+- include repo-doc content in repo-pages
 - keep sync reliable inside Obsidian desktop
 - preserve enough diagnostics to debug long-running sync failures
 
 ## Current fork behavior
 
-- Repository README content is fetched from the GitHub `readme` endpoint and rendered under `## README`
+- Repository README content is called repo-doc content in this fork.
+- Generated Obsidian Markdown pages for repositories are called repo-pages.
+- Repo-doc content is fetched from the GitHub `readme` endpoint and rendered under `## Repo-doc`.
+- Star metadata sync and repo-doc fetching are separate commands.
 - `isArchived`, `isFork`, `isPrivate`, and `isTemplate` stay in plugin storage but are not written to note frontmatter
 - GitHub API traffic uses Obsidian `requestUrl`
 - Retry/backoff is enabled for retryable HTTP status codes:
@@ -30,6 +33,8 @@ Primary fork goals:
 - Installed plugin dir: `.obsidian/plugins/github-stars` inside the target vault
 - Plugin debug log: `.obsidian/plugins/github-stars/debug.log` inside the target vault
 - Synced database: `GitHub/db/stars.db` inside the target vault
+- qmd collection for Rajat's vault: `github-stars`
+- qmd config: `/Users/rajat/.config/qmd/index.yml`
 
 ## Build and install
 
@@ -59,26 +64,42 @@ Plugin state:
 obsidian vault="<vault-name>" eval code='(() => { const p = app.plugins.plugins["github-stars"]; return JSON.stringify({ lock: p?.lock?.locked ?? null, enabled: app.plugins.enabledPlugins.has("github-stars"), stats: p?.settings?.stats ?? null }); })()'
 ```
 
-README coverage:
+repo-doc coverage:
 
 ```bash
-sqlite3 <vault>/GitHub/db/stars.db "select count(*) as repos, sum(case when readme is not null and trim(readme) <> '' then 1 else 0 end) as repos_with_readme from repositories;"
+sqlite3 <vault>/GitHub/db/stars.db "select count(*) as repos, sum(case when readmeFetchedAt is not null then 1 else 0 end) as repo_doc_checked, sum(case when readme is not null and trim(readme) <> '' then 1 else 0 end) as repos_with_repo_doc from repositories;"
 ```
 
-Missing READMEs:
+Missing unchecked repo-docs:
 
 ```bash
-sqlite3 <vault>/GitHub/db/stars.db "select owner, name from repositories where readme is null or trim(readme) = '' order by owner, name;"
+sqlite3 <vault>/GitHub/db/stars.db "select owner, name from repositories where readmeFetchedAt is null order by owner, name;"
+```
+
+Loaded command IDs:
+
+```bash
+obsidian vault="<vault-name>" eval code='Object.keys(app.commands.commands).filter((id) => id.startsWith("github-stars:")).sort().join("\n")'
+```
+
+qmd search validation for Rajat's vault:
+
+```bash
+qmd status
+qmd search "kubernetes dashboard" -c github-stars -n 5
+qmd query "tools for searching local markdown notes" -c github-stars -n 5
 ```
 
 ## Known successful state
 
-Validated successful full sync in the reference vault:
-- `1250` repos synced
-- `1247` repos with README content
-- sync survived transient GitHub `502` errors via retry/backoff
+Validated successful command-split sync in Rajat's vault on 2026-05-02:
+- `1325` active repositories in SQLite
+- `1324` repositories with repo-doc check completed
+- `1322` repositories with repo-doc content
+- qmd collection `github-stars` indexing `1337` repo-pages
+- qmd vectors complete: `11231` embedded chunks
 
-At that validation point, repos without README content were:
+At that validation point, repos without repo-doc content were:
 - `LANDrop/LANDrop-releases`
 - `pushowl/pushowl_event`
 - `tract-docs/tract-docs.dev`
@@ -86,9 +107,9 @@ At that validation point, repos without README content were:
 ## Known caveats
 
 - Private repos are still imported if the token can access them; this is not yet filtered out globally
-- README import does not rewrite relative links or images
-- Full sync writes to SQLite in one transaction, so imported README rows are not visible until commit
-- Long syncs can take many minutes with README fetching enabled
+- Repo-doc import does not rewrite relative links or images
+- Full star sync does not fetch repo-docs; use the repo-doc commands for that phase
+- Long repo-doc refreshes can take many minutes depending on GitHub latency and concurrency
 
 ## Token requirements
 

@@ -11,7 +11,9 @@ This plugin for [Obsidian][Obsidian] imports your GitHub stars into your vault a
 This repository is a fork of [`vovanbo/obsidian-github-stars`](https://github.com/vovanbo/obsidian-github-stars).
 
 Current fork-specific changes:
-- Include repository `README` content in generated repository notes
+- Include repository README content, called repo-doc content, in generated repository pages
+- Split star metadata sync from repo-doc fetching
+- Soft-archive unstarred repository pages instead of deleting them
 - Hide `isArchived`, `isFork`, `isPrivate`, and `isTemplate` from note frontmatter while still retaining them in plugin storage
 - Use Obsidian's native `requestUrl` HTTP transport for GitHub API calls instead of browser fetch, which avoids desktop CORS failures
 - Retry transient GitHub API failures (`429`, `500`, `502`, `503`, `504`) during sync
@@ -41,7 +43,7 @@ Current fork-specific changes:
 ## Features
 
 - Create document for each starred repository
-- Include the repository README in each generated repository page when available
+- Include repo-doc content in each generated repository page when available
 - Use Obsidian-native HTTP requests for GitHub API calls
 - Retry transient GitHub API failures during sync
 - Write a persistent debug log for sync troubleshooting
@@ -100,8 +102,8 @@ You have two options to install this plugin:
 2. Enter your GitHub token in "GitHub API access token" field (see a demo video above).
 3. Wait a second, and plugin will save your token to settings.
 4. Press `Cmd + P` (Mac) or `Ctrl + P` (Windows/Linux) to open the Obsidian command palette.
-5. Type "GitHub stars" and select plugin command `GitHub stars: Synchronize your starred repositories`.
-6. If API token is valid, plugin will start synchronization process. In dependence of count of your starred repositories it will take some time.
+5. Type "GitHub stars" and select plugin command `GitHub stars: Sync starred repositories`.
+6. If API token is valid, plugin will start star metadata synchronization. In dependence of count of your starred repositories it will take some time.
 For example, if you have around 2500 starred repositories, it will take about 5 minutes with page size set to `50`
 (about 5 seconds to request/response).
 The reason of this is that GitHub GraphQL API uses pagination to fetch data, which means that the plugin needs to make multiple requests to the API to retrieve all the data.
@@ -116,6 +118,15 @@ Name of the folder is set to "GitHub" by default, but you can change it in the p
       - `Stars by days.md`. This file contains a list of all your starred repositories grouped by the day they were starred.
       - `Stars by owners.md`. This file contains a list of all your starred repositories grouped by the owner of the repository.
       - `Stars by languages.md`. This file contains a list of all your starred repositories grouped by the main programming language used in the repository.
+
+#### Commands
+
+- `GitHub stars: Sync starred repositories` syncs starred repository metadata and regenerates repo-pages/index-pages without fetching repo-docs.
+- `GitHub stars: Fetch missing repo-docs` fetches repo-docs that have never been checked.
+- `GitHub stars: Refresh stale repo-docs` refreshes repo-docs older than the configured TTL.
+- `GitHub stars: Refresh all repo-docs` refreshes all eligible repo-docs.
+- `GitHub stars: Recreate repo-pages locally` recreates repo-pages/index-pages from local DB state.
+- `GitHub stars: Archive unstarred repo-pages` moves unstarred repo-pages into the archive folder.
 
 #### Structure of Markdown repository file
 
@@ -144,7 +155,7 @@ That exactly will be placed inside tags you can see in the demo video above. In 
 - Name of repository
 - URL to repository
 - Description of repository (if available)
-- README content (if available)
+- Repo-doc content (if available)
 - Homepage URL
 - URL to repository owner page on GitHub
 - Information about latest release if available
@@ -170,13 +181,24 @@ topics: <list of topics>
 ---
 ```
 
-#### Incremental update
+#### qmd search for Rajat's vault
 
-Documentation will be updated soon.
+Rajat's vault is indexed by qmd for local search across generated repo-pages, including archived/unstarred repo-pages:
 
-#### Remove unstarred repositories
+```bash
+qmd status
+qmd search "kubernetes dashboard" -c github-stars -n 5
+qmd vsearch "local first markdown search" -c github-stars -n 5
+qmd query "tools for searching local markdown notes" -c github-stars -n 5
+qmd get qmd://github-stars/repositories/tobi/qmd.md -l 40
+```
 
-Documentation will be updated soon.
+After sync/archive changes, refresh qmd:
+
+```bash
+qmd update
+qmd embed --max-docs-per-batch 10 --max-batch-mb 5
+```
 
 #### Debug logging
 
@@ -195,14 +217,14 @@ That log includes:
 
 ## Roadmap to 1.0
 
-- [x] Automatically remove files related to removed stars
+- [x] Soft-archive files related to removed stars
 - [x] Incremental update
 - [ ] Use Obsidian views to:
     - [ ] Make a full text search
     - [ ] Show statistics
     - [ ] Show ratings
 - [ ] i18n / l10n
-- [x] Fetch README file content on a starred repository page
+- [x] Fetch repo-doc content on a starred repository page
 - [ ] Global changes log
 - [ ] Highlight archived, deprecated and unmaintained repositories
 - [ ] Customizable templates of pages
@@ -222,8 +244,8 @@ That log includes:
 ### Notes about this fork
 
 - GitHub API requests currently use Obsidian `requestUrl`, not `octokit`
-- README fetch is limited to the repository root README returned by the GitHub `readme` endpoint
-- Relative links and images inside imported READMEs are not rewritten yet
+- Repo-doc fetch is limited to the repository root README returned by the GitHub `readme` endpoint
+- Relative links and images inside imported repo-docs are not rewritten yet
 - Private repositories are still imported if the GitHub token can see them; this is not yet filtered out globally
 
 ## Inspiration sources
