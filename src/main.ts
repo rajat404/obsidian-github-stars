@@ -4,21 +4,17 @@ import { Code, PluginError } from "@/errors";
 import { isEmpty, isMatch, isNull, isUndefined } from "@/helpers";
 import { configureLogger, logError, logInfo, resetDebugLog } from "@/logger";
 import { confirm } from "@/modals";
+import {
+    type RepoDocMode,
+    fetchRepoDocsWithConcurrency,
+    selectRepoDocCandidates,
+} from "@/repoDocs";
 import { GithubRepositoriesService } from "@/services/github";
 import { DEFAULT_SETTINGS, type PluginSettings, SettingsTab } from "@/settings";
 import { StatusBar, StatusBarAction } from "@/statusBar";
-import {
-    type ImportConfig,
-    PluginStorage,
-    type RemovedRepository,
-} from "@/storage";
+import { type ImportConfig, PluginStorage } from "@/storage";
 import type { GitHub } from "@/types";
-import {
-    PluginLock,
-    getOrCreateFolder,
-    removeFile,
-    renameFolder,
-} from "@/utils";
+import { PluginLock, getOrCreateFolder, renameFolder } from "@/utils";
 import Handlebars from "handlebars";
 import { DateTime } from "luxon";
 import {
@@ -57,6 +53,10 @@ export default class GithubStarsPlugin extends Plugin {
         return `${this.settings.destinationFolder}/repositories`;
     }
 
+    private get archivedRepositoriesFolder() {
+        return `${this.settings.destinationFolder}/unstarred`;
+    }
+
     override async onload(): Promise<void> {
         await this.loadSettings();
         configureLogger(this.app.vault.adapter);
@@ -69,130 +69,52 @@ export default class GithubStarsPlugin extends Plugin {
         );
 
         this.addCommand({
-            id: "sync",
-            name: "Synchronize your starred repositories",
+            id: "sync-stars",
+            name: "Sync starred repositories",
+            callback: async () => await this.syncStars(),
+        });
+
+        this.addCommand({
+            id: "fetch-missing-repo-docs",
+            name: "Fetch missing repo-docs",
+            callback: async () => await this.fetchRepoDocs("missing"),
+        });
+
+        this.addCommand({
+            id: "refresh-stale-repo-docs",
+            name: "Refresh stale repo-docs",
+            callback: async () => await this.fetchRepoDocs("stale"),
+        });
+
+        this.addCommand({
+            id: "refresh-all-repo-docs",
+            name: "Refresh all repo-docs",
             callback: async () => {
-                const config: ImportConfig = {
-                    fullSync: true,
-                    removeUnstarred: true,
-                    lastRepoId: this.settings.stats.lastRepoId,
-                };
-
-                const isFirstSync = isUndefined(this.settings.stats.lastRepoId);
-                // First sync will be always full
-                if (!isFirstSync) {
-                    config.fullSync = await confirm({
-                        app: this.app,
-                        title: "Do you want to make a full synchronization?",
-                        message:
-                            "Full sync will update all the data related to your starred repositories, but may take more significant time.",
-                        okButtonText: "Yes",
-                        cancelButtonText: "No",
-                    });
-
-                    if (config.fullSync) {
-                        config.removeUnstarred = await confirm({
-                            app: this.app,
-                            title: "Do you want to remove unstarred repositories?",
-                            message:
-                                'If you want to leave files related to unstarred repositories after import say "No". You can remove them later manually.',
-                            okButtonText: "Yes",
-                            cancelButtonText: "No",
-                        });
-                    }
+                const isConfirmed = await confirm({
+                    app: this.app,
+                    title: "Refresh all repo-docs?",
+                    message:
+                        "This fetches repo-docs for every active public starred repository and may take several minutes.",
+                    okButtonText: "Refresh",
+                    cancelButtonText: "Cancel",
+                });
+                if (!isConfirmed) {
+                    return;
                 }
-
-                await resetDebugLog("sync command started");
-                logInfo("sync configuration resolved", {
-                    fullSync: config.fullSync,
-                    removeUnstarred: config.removeUnstarred,
-                    hasLastRepoId: !isUndefined(config.lastRepoId),
-                    pageSize: this.settings.pageSize,
-                    destinationFolder: this.settings.destinationFolder,
-                });
-                const result = await this.lock.run(() => {
-                    const doImportDataToStorage = ResultAsync.fromPromise(
-                        this.importDataToStorage(config),
-                        (error) => {
-                            logError("importDataToStorage promise rejected", {
-                                error: String(error),
-                            });
-                            return new PluginError(Code.Api.ImportFailed);
-                        },
-                    ).andThen((result) => {
-                        if (result.isErr()) {
-                            return err(result.error);
-                        }
-                        return ok(result.value);
-                    });
-
-                    return this.prepareStorage()
-                        .andThen(() => doImportDataToStorage)
-                        .andThrough(() => {
-                            if (!config.removeUnstarred) {
-                                return okAsync();
-                            }
-                            return this.removeUnstarredRepositories();
-                        })
-                        .andThen(() => this.storage.getRepositories())
-                        .andThen((repos) => this.createOrUpdatePages(repos))
-                        .andTee(() => this.updateStats())
-                        .andThrough(() => this.storage.close())
-                        .orTee((error) => {
-                            logError("sync pipeline failed", {
-                                code: error.code,
-                                name: error.name,
-                                message: error.message,
-                            });
-                            return error.log().notice();
-                        });
-                });
-                return result
-                    .andTee(() =>
-                        logInfo("sync command completed successfully"),
-                    )
-                    .orTee((error) => {
-                        logError("sync command failed", {
-                            code: error.code,
-                            name: error.name,
-                            message: error.message,
-                        });
-                        return error.log().notice();
-                    });
+                return await this.fetchRepoDocs("all");
             },
         });
 
         this.addCommand({
-            id: "update-pages",
-            name: "Update or create pages without sync",
-            callback: async () => {
-                const result = await this.lock.run(() => {
-                    return this.prepareStorage()
-                        .andThen((storage) => storage.getRepositories())
-                        .andThen((repos) => this.createOrUpdatePages(repos))
-                        .andTee(() => this.updateStats())
-                        .andThrough(() => this.storage.close())
-                        .orTee((error) => error.log().notice());
-                });
-                return result.orTee((error) => error.log().notice());
-            },
+            id: "recreate-repo-pages",
+            name: "Recreate repo-pages locally",
+            callback: async () => await this.recreateRepoPages(),
         });
 
         this.addCommand({
-            id: "remove-unstarred",
-            name: "Remove unstarred repositories",
-            callback: async () => {
-                const result = await this.lock.run(() => {
-                    return this.prepareStorage()
-                        .andThen(() => this.removeUnstarredRepositories())
-                        .andTee(() => this.updateStats())
-                        .andThen(() => this.storage.getRepositories())
-                        .andThen((repos) => this.createOrUpdatePages(repos))
-                        .andThrough(() => this.storage.close())
-                        .orTee((error) => error.log().notice());
-                });
-                return result.orTee((error) => error.log().notice());
-            },
+            id: "archive-unstarred-repo-pages",
+            name: "Archive unstarred repo-pages",
+            callback: async () => await this.archiveUnstarredRepoPages(),
         });
     }
 
@@ -281,6 +203,209 @@ export default class GithubStarsPlugin extends Plugin {
         );
     }
 
+    private async syncStars() {
+        const config: ImportConfig = {
+            fullSync: true,
+            removeUnstarred: false,
+            lastRepoId: undefined,
+        };
+
+        await resetDebugLog("sync-stars command started");
+        logInfo("sync-stars configuration resolved", {
+            fullSync: config.fullSync,
+            removeUnstarred: config.removeUnstarred,
+            pageSize: this.settings.pageSize,
+            destinationFolder: this.settings.destinationFolder,
+        });
+
+        const result = await this.lock.run(() => {
+            const doImportDataToStorage = ResultAsync.fromPromise(
+                this.importDataToStorage(config),
+                (error) => {
+                    logError("importDataToStorage promise rejected", {
+                        error: String(error),
+                    });
+                    return new PluginError(Code.Api.ImportFailed);
+                },
+            ).andThen((result) => {
+                if (result.isErr()) {
+                    return err(result.error);
+                }
+                return ok(result.value);
+            });
+
+            return this.prepareStorage()
+                .andThen(() => doImportDataToStorage)
+                .andThen(() => this.storage.getRepositories())
+                .andThrough((repos) =>
+                    this.api.restoreArchivedRepoPages(
+                        this.activeRepositories(repos),
+                        this.repostioriesFolder,
+                        this.archivedRepositoriesFolder,
+                    ),
+                )
+                .andThen((repos) => this.createOrUpdatePages(repos))
+                .andTee(() => this.updateStats())
+                .andThrough(() => this.storage.close())
+                .orTee((error) => {
+                    logError("sync-stars pipeline failed", {
+                        code: error.code,
+                        name: error.name,
+                        message: error.message,
+                    });
+                    return error.log().notice();
+                });
+        });
+
+        return result
+            .andTee(() => logInfo("sync-stars command completed successfully"))
+            .orTee((error) => {
+                logError("sync-stars command failed", {
+                    code: error.code,
+                    name: error.name,
+                    message: error.message,
+                });
+                return error.log().notice();
+            });
+    }
+
+    private async recreateRepoPages() {
+        const result = await this.lock.run(() => {
+            return this.prepareStorage()
+                .andThen((storage) => storage.getRepositories())
+                .andThen((repos) => this.createOrUpdatePages(repos))
+                .andTee(() => this.updateStats())
+                .andThrough(() => this.storage.close())
+                .orTee((error) => error.log().notice());
+        });
+        return result.orTee((error) => error.log().notice());
+    }
+
+    private async archiveUnstarredRepoPages() {
+        const result = await this.lock.run(() => {
+            return this.prepareStorage()
+                .andThen((storage) => storage.getRepositories())
+                .andThrough((repos) =>
+                    this.api.archiveRepoPages(
+                        repos.filter((repo) => Boolean(repo.unstarredAt)),
+                        this.repostioriesFolder,
+                        this.archivedRepositoriesFolder,
+                    ),
+                )
+                .andThen((repos) => this.createOrUpdatePages(repos))
+                .andTee(() => this.updateStats())
+                .andThrough(() => this.storage.close())
+                .orTee((error) => error.log().notice());
+        });
+        return result.orTee((error) => error.log().notice());
+    }
+
+    private async fetchRepoDocs(mode: RepoDocMode) {
+        const result = await this.lock.run(() => {
+            return this.prepareStorage()
+                .andThen((storage) => storage.getRepositories())
+                .andThen((repos) =>
+                    ResultAsync.fromPromise(
+                        this.fetchAndPersistRepoDocs(mode, repos),
+                        () => new PluginError(Code.Api.ProcessingFailed),
+                    ).andThen((result) => result),
+                )
+                .andThen(() => this.storage.getRepositories())
+                .andThen((repos: GitHub.Repository[]) => {
+                    if (!this.settings.updateRepoPagesAfterRepoDocFetch) {
+                        return okAsync();
+                    }
+                    return this.createOrUpdatePages(repos);
+                })
+                .andTee(() => this.updateStats())
+                .andThrough(() => this.storage.close())
+                .orTee((error) => error.log().notice());
+        });
+        return result.orTee((error) => error.log().notice());
+    }
+
+    private async fetchAndPersistRepoDocs(
+        mode: RepoDocMode,
+        repos: GitHub.Repository[],
+    ): Promise<Result<GitHub.Repository[], PluginError<Code.Any>>> {
+        const candidates = selectRepoDocCandidates(repos, {
+            mode,
+            now: DateTime.utc(),
+            ttlDays: this.settings.repoDocRefreshTtlDays,
+        });
+        const startedAt = DateTime.utc();
+        logInfo("repo-doc command started", {
+            mode,
+            candidateCount: candidates.length,
+            concurrency: this.settings.repoDocRequestConcurrency,
+            ttlDays: this.settings.repoDocRefreshTtlDays,
+        });
+        new Notice(`Fetching repo-docs for ${candidates.length} repositories…`);
+
+        const service = new GithubRepositoriesService(
+            this.settings.accessToken,
+        );
+        const summary = await fetchRepoDocsWithConcurrency(
+            candidates,
+            this.settings.repoDocRequestConcurrency,
+            async (repo) => {
+                logInfo("repo-doc fetch start", {
+                    repository: repo.url.toString(),
+                    mode,
+                });
+                const repoDocResult = await service.getRepositoryReadme(
+                    repo.owner.login,
+                    repo.name,
+                );
+                if (repoDocResult.isErr()) {
+                    throw repoDocResult.error;
+                }
+                logInfo("repo-doc fetch completed", {
+                    repository: repo.url.toString(),
+                    mode,
+                    hasRepoDoc: Boolean(repoDocResult.value),
+                    contentLength: repoDocResult.value?.length ?? 0,
+                });
+                return repoDocResult.value;
+            },
+        );
+
+        const updateResult = await this.storage.updateRepoDocs(
+            summary.successes,
+        );
+        if (updateResult.isErr()) {
+            return err(updateResult.error);
+        }
+
+        const elapsedSeconds = DateTime.utc().diff(
+            startedAt,
+            "seconds",
+        ).seconds;
+        logInfo("repo-doc command completed", {
+            mode,
+            candidateCount: candidates.length,
+            successCount: summary.successes.filter(
+                (item) => item.status === "success",
+            ).length,
+            noRepoDocCount: summary.successes.filter(
+                (item) => item.status === "no-repo-doc",
+            ).length,
+            failureCount: summary.failures.length,
+            elapsedSeconds,
+            candidatesPerSecond:
+                candidates.length / Math.max(1, elapsedSeconds),
+        });
+
+        if (summary.failures.length) {
+            new Notice(
+                `Repo-doc fetch finished with ${summary.failures.length} failures. See debug.log.`,
+                10000,
+            );
+        }
+
+        return ok(repos);
+    }
+
     private async importDataToStorage(
         config: ImportConfig,
     ): Promise<Result<void, PluginError<Code.Any>>> {
@@ -305,7 +430,7 @@ export default class GithubStarsPlugin extends Plugin {
         const totalCount = totalCountResult.value;
         logInfo("fetched total starred repositories count", { totalCount });
         new Notice(
-            `Start import of ${totalCount} GitHub stars (page size is ${this.settings.pageSize} items)…`,
+            `Start metadata sync of ${totalCount} GitHub stars (page size is ${this.settings.pageSize} items)…`,
         );
 
         const statusBarAction = new StatusBarAction(
@@ -327,17 +452,15 @@ export default class GithubStarsPlugin extends Plugin {
                     );
                 }
             },
-            async (repo) =>
-                await service.getRepositoryReadme(repo.owner.login, repo.name),
         );
 
         if (result.isOk()) {
-            new Notice("Import of your GitHub stars was successful!");
+            new Notice("Metadata sync of your GitHub stars was successful!");
             statusBarAction.done();
             logInfo("importDataToStorage completed", { totalCount });
         } else {
             new Notice(
-                "ERROR. Import of your GitHub starred repositories was failed!",
+                "ERROR. Metadata sync of your GitHub starred repositories failed!",
                 0,
             );
             statusBarAction.failed();
@@ -367,11 +490,19 @@ export default class GithubStarsPlugin extends Plugin {
             });
     }
 
+    private activeRepositories(repos: GitHub.Repository[]) {
+        return repos.filter((repo) => !repo.unstarredAt);
+    }
+
     private createOrUpdatePages(repos: GitHub.Repository[]) {
-        logInfo("createOrUpdatePages start", { repositoryCount: repos.length });
+        const activeRepos = this.activeRepositories(repos);
+        logInfo("createOrUpdatePages start", {
+            repositoryCount: activeRepos.length,
+            skippedUnstarredCount: repos.length - activeRepos.length,
+        });
         new Notice("Creation of pages for your GitHub stars was started…");
 
-        const total = repos.length;
+        const total = activeRepos.length;
         const statusBarActions: Record<string, StatusBarAction> = {
             indexByDays: new StatusBarAction(
                 this.statusBar as StatusBar,
@@ -399,7 +530,7 @@ export default class GithubStarsPlugin extends Plugin {
         }
 
         const pagesOfRepositories = this.api.createOrUpdateRepositoriesPages(
-            repos,
+            activeRepos,
             this.repostioriesFolder,
             (createdPages, updatedPages) => {
                 statusBarActions.reposPages.updateState(
@@ -408,20 +539,20 @@ export default class GithubStarsPlugin extends Plugin {
             },
         );
         const indexPageByDays = this.api.createOrUpdateIndexPageByDays(
-            repos,
+            activeRepos,
             this.settings.destinationFolder,
             this.repostioriesFolder,
             this.settings.indexPageByDaysFileName,
         );
         const indexPageByLanguages =
             this.api.createOrUpdateIndexPageByLanguages(
-                repos,
+                activeRepos,
                 this.settings.destinationFolder,
                 this.repostioriesFolder,
                 this.settings.indexPageByLanguagesFileName,
             );
         const indexPageByOwners = this.api.createOrUpdateIndexPageByOwners(
-            repos,
+            activeRepos,
             this.settings.destinationFolder,
             this.repostioriesFolder,
             this.settings.indexPageByOwnersFileName,
@@ -463,7 +594,7 @@ export default class GithubStarsPlugin extends Plugin {
             .andThen(() => ok())
             .andTee(() =>
                 logInfo("createOrUpdatePages completed", {
-                    repositoryCount: repos.length,
+                    repositoryCount: activeRepos.length,
                 }),
             )
             .orTee((error) => {
@@ -474,36 +605,6 @@ export default class GithubStarsPlugin extends Plugin {
                 });
                 return error.log().notice();
             });
-    }
-
-    private removeUnstarredRepositories(
-        withFiles = true,
-    ): ResultAsync<RemovedRepository[], PluginError<Code.Any>> {
-        const storageRemoveResult = ResultAsync.fromPromise(
-            this.storage.removeUnstarredRepositores(),
-            () => new PluginError(Code.Api.ProcessingFailed),
-        ).andThen((result) => {
-            if (result.isErr()) {
-                return err(result.error);
-            }
-            return ok(result.value);
-        });
-
-        return storageRemoveResult.andThrough((removedRepos) => {
-            if (!withFiles) {
-                return okAsync();
-            }
-            return ResultAsync.combine(
-                removedRepos.map((repo) => {
-                    const unstarredRepoFilePath = `${this.repostioriesFolder}/${repo.owner}/${repo.name}.md`;
-                    return removeFile(
-                        this.app.vault,
-                        this.app.fileManager,
-                        unstarredRepoFilePath,
-                    );
-                }),
-            );
-        });
     }
 
     private renameDestinationFolder(

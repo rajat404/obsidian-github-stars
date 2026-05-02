@@ -15,6 +15,7 @@ import schemaQuery from "@/db/queries/schema.sql";
 import type { SqliteDatabase } from "@/db/sqlite";
 import { Code, PluginError } from "@/errors";
 import { logError, logInfo, logWarn } from "@/logger";
+import type { RepoDocFetchResult } from "@/repoDocs";
 import type { StarredRepositoriesGenerator } from "@/services/github";
 import { DEFAULT_STATS } from "@/settings";
 import type { GitHub } from "@/types";
@@ -207,7 +208,7 @@ export class PluginStorage {
                     }
 
                     if (!repo.isPrivate && readmeGetter) {
-                        logInfo("README fetch start for repository", {
+                        logInfo("repo-doc fetch start for repository", {
                             repository: repo.url.toString(),
                             importedCount: importedReposIds.size,
                         });
@@ -220,7 +221,7 @@ export class PluginStorage {
                                 readme = readmeResult.value;
                                 readmeFetchedAt = now.toISO();
                             }
-                            logInfo("README fetch completed for repository", {
+                            logInfo("repo-doc fetch completed for repository", {
                                 repository: repo.url.toString(),
                                 importedCount: importedReposIds.size,
                                 hasReadme: Boolean(readmeResult.value),
@@ -228,17 +229,20 @@ export class PluginStorage {
                             });
                         } else {
                             readmeFetchFailures += 1;
-                            logWarn("README fetch failed for repository", {
+                            logWarn("repo-doc fetch failed for repository", {
                                 repository: repo.url.toString(),
                                 importedCount: importedReposIds.size,
                                 code: readmeResult.error.code,
                             });
                         }
                     } else if (repo.isPrivate) {
-                        logInfo("README fetch skipped for private repository", {
-                            repository: repo.url.toString(),
-                            importedCount: importedReposIds.size,
-                        });
+                        logInfo(
+                            "repo-doc fetch skipped for private repository",
+                            {
+                                repository: repo.url.toString(),
+                                importedCount: importedReposIds.size,
+                            },
+                        );
                     }
 
                     if (repo.licenseInfo?.spdxId) {
@@ -526,5 +530,53 @@ export class PluginStorage {
             removeUnstarredRepositoriesStmt.free();
         }
         return result.andThrough(() => this.db.save());
+    }
+
+    public updateRepoDocs(
+        results: RepoDocFetchResult[],
+    ): ResultAsync<void, PluginError<Code.Any>> {
+        if (this.db.instance.isErr()) {
+            return errAsync(this.db.instance.error);
+        }
+
+        if (!results.length) {
+            return okAsync();
+        }
+
+        const db = this.db.instance.value;
+        const updateStmt = db.prepare(`
+UPDATE repositories
+SET readme = $readme,
+    readmeFetchedAt = $readmeFetchedAt
+WHERE id = $id
+`);
+
+        try {
+            db.run("BEGIN TRANSACTION;");
+            for (const result of results) {
+                updateStmt.bind({
+                    $id: result.repo.id,
+                    $readme: result.readme ?? null,
+                    $readmeFetchedAt: result.fetchedAt.toUTC().toISO(),
+                });
+                updateStmt.step();
+                updateStmt.reset();
+            }
+            db.run("COMMIT;");
+            logInfo("repo-doc batch update committed", {
+                updatedCount: results.length,
+            });
+        } catch (error) {
+            db.run("ROLLBACK;");
+            logError("repo-doc batch update failed", {
+                error: String(error),
+                updatedCount: results.length,
+            });
+            return errAsync(new PluginError(Code.Storage.ImportFailed));
+        } finally {
+            updateStmt.free();
+        }
+
+        return this.db.save();
     }
 }

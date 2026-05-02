@@ -283,7 +283,7 @@ export class GithubRepositoriesService implements IGithubRepositoriesService {
     ): ResultAsync<string | undefined, PluginError<Code.GithubService>> {
         return ResultAsync.fromPromise(
             (async () => {
-                logInfo("GitHub README request start", { owner, repo });
+                logInfo("GitHub repo-doc request start", { owner, repo });
                 const response = await this.requestWithRetry({
                     url: `${GITHUB_API_URL}/repos/${owner}/${repo}/readme`,
                     method: "GET",
@@ -291,28 +291,28 @@ export class GithubRepositoriesService implements IGithubRepositoriesService {
 
                 if (!response) {
                     throw new Error(
-                        "GitHub README request returned no response",
+                        "GitHub repo-doc request returned no response",
                     );
                 }
 
                 if (response.status === 404) {
-                    logInfo("GitHub README not found", { owner, repo });
+                    logInfo("GitHub repo-doc not found", { owner, repo });
                     return undefined;
                 }
 
                 if (response.status >= 400) {
-                    logWarn("GitHub README request failed", {
+                    logWarn("GitHub repo-doc request failed", {
                         owner,
                         repo,
                         status: response.status,
                         body: response.text.slice(0, 500),
                     });
-                    throw new Error(`GitHub README HTTP ${response.status}`);
+                    throw new Error(`GitHub repo-doc HTTP ${response.status}`);
                 }
 
                 const data = response.json as GitHubRest.ReadmeResponse;
                 if (!data.content) {
-                    logInfo("GitHub README response had no content", {
+                    logInfo("GitHub repo-doc response had no content", {
                         owner,
                         repo,
                         status: response.status,
@@ -325,7 +325,7 @@ export class GithubRepositoriesService implements IGithubRepositoriesService {
                         data.content.replaceAll("\n", ""),
                         "base64",
                     ).toString("utf-8");
-                    logInfo("GitHub README request completed", {
+                    logInfo("GitHub repo-doc request completed", {
                         owner,
                         repo,
                         status: response.status,
@@ -335,7 +335,7 @@ export class GithubRepositoriesService implements IGithubRepositoriesService {
                     return decoded;
                 }
 
-                logInfo("GitHub README request completed", {
+                logInfo("GitHub repo-doc request completed", {
                     owner,
                     repo,
                     status: response.status,

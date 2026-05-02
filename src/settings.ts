@@ -16,6 +16,9 @@ export interface PluginSettings {
     pageSize: number;
     accessToken: string;
     destinationFolder: string;
+    repoDocRefreshTtlDays: number;
+    repoDocRequestConcurrency: number;
+    updateRepoPagesAfterRepoDocFetch: boolean;
     indexPageByOwnersFileName: string;
     indexPageByDaysFileName: string;
     indexPageByLanguagesFileName: string;
@@ -34,6 +37,9 @@ export const DEFAULT_SETTINGS: PluginSettings = {
     pageSize: 50,
     accessToken: "",
     destinationFolder: normalizePath("GitHub"),
+    repoDocRefreshTtlDays: 30,
+    repoDocRequestConcurrency: 6,
+    updateRepoPagesAfterRepoDocFetch: true,
     indexPageByOwnersFileName: "Stars by owners.md",
     indexPageByDaysFileName: "Stars by days.md",
     indexPageByLanguagesFileName: "Stars by languages.md",
@@ -51,6 +57,9 @@ export class SettingsTab extends PluginSettingTab {
     private accessTokenSetting?: Setting;
     private pageSizeSetting?: Setting;
     private destinationFolderSetting?: Setting;
+    private repoDocRefreshTtlDaysSetting?: Setting;
+    private repoDocRequestConcurrencySetting?: Setting;
+    private updateRepoPagesAfterRepoDocFetchSetting?: Setting;
 
     constructor(app: App, plugin: GithubStarsPlugin) {
         super(app, plugin);
@@ -78,6 +87,45 @@ export class SettingsTab extends PluginSettingTab {
             if (validSettings.pageSize > 100) {
                 validSettings.pageSize = 100;
             }
+        }
+
+        if (
+            !isUndefined(settings.repoDocRefreshTtlDays) &&
+            this.plugin.settings.repoDocRefreshTtlDays !==
+                settings.repoDocRefreshTtlDays
+        ) {
+            validSettings.repoDocRefreshTtlDays =
+                settings.repoDocRefreshTtlDays;
+            if (validSettings.repoDocRefreshTtlDays < 1) {
+                validSettings.repoDocRefreshTtlDays = 1;
+            }
+            if (validSettings.repoDocRefreshTtlDays > 365) {
+                validSettings.repoDocRefreshTtlDays = 365;
+            }
+        }
+
+        if (
+            !isUndefined(settings.repoDocRequestConcurrency) &&
+            this.plugin.settings.repoDocRequestConcurrency !==
+                settings.repoDocRequestConcurrency
+        ) {
+            validSettings.repoDocRequestConcurrency =
+                settings.repoDocRequestConcurrency;
+            if (validSettings.repoDocRequestConcurrency < 1) {
+                validSettings.repoDocRequestConcurrency = 1;
+            }
+            if (validSettings.repoDocRequestConcurrency > 15) {
+                validSettings.repoDocRequestConcurrency = 15;
+            }
+        }
+
+        if (
+            !isUndefined(settings.updateRepoPagesAfterRepoDocFetch) &&
+            this.plugin.settings.updateRepoPagesAfterRepoDocFetch !==
+                settings.updateRepoPagesAfterRepoDocFetch
+        ) {
+            validSettings.updateRepoPagesAfterRepoDocFetch =
+                settings.updateRepoPagesAfterRepoDocFetch;
         }
 
         if (
@@ -113,6 +161,11 @@ Destination folder will be renamed from <pre>${this.plugin.settings.destinationF
                     this.accessTokenSetting?.setDisabled(true);
                     this.pageSizeSetting?.setDisabled(true);
                     this.destinationFolderSetting?.setDisabled(true);
+                    this.repoDocRefreshTtlDaysSetting?.setDisabled(true);
+                    this.repoDocRequestConcurrencySetting?.setDisabled(true);
+                    this.updateRepoPagesAfterRepoDocFetchSetting?.setDisabled(
+                        true,
+                    );
 
                     const validSettings = await this.validateSettings(settings);
                     await this.plugin.updateSettings(validSettings);
@@ -120,6 +173,11 @@ Destination folder will be renamed from <pre>${this.plugin.settings.destinationF
                     this.accessTokenSetting?.setDisabled(false);
                     this.pageSizeSetting?.setDisabled(false);
                     this.destinationFolderSetting?.setDisabled(false);
+                    this.repoDocRefreshTtlDaysSetting?.setDisabled(false);
+                    this.repoDocRequestConcurrencySetting?.setDisabled(false);
+                    this.updateRepoPagesAfterRepoDocFetchSetting?.setDisabled(
+                        false,
+                    );
                     this.containerEl.removeClass(this.inProgressCssClass);
                     this.redraw();
                 },
@@ -144,6 +202,19 @@ Destination folder will be renamed from <pre>${this.plugin.settings.destinationF
             .setName("Destination folder")
             .setDesc(
                 "Folder inside your vault where new documents will be created. Relative to your vault root.",
+            );
+        this.repoDocRefreshTtlDaysSetting = new Setting(containerEl)
+            .setName("Repo-doc refresh TTL")
+            .setDesc(
+                "Days before fetched repo-doc state is stale. Range 1-365.",
+            );
+        this.repoDocRequestConcurrencySetting = new Setting(containerEl)
+            .setName("Repo-doc request concurrency")
+            .setDesc("Parallel repo-doc requests. Range 1-15.");
+        this.updateRepoPagesAfterRepoDocFetchSetting = new Setting(containerEl)
+            .setName("Update repo-pages after repo-doc fetch")
+            .setDesc(
+                "Recreate local repo-pages after repo-doc commands finish.",
             );
     }
 
@@ -184,6 +255,42 @@ Destination folder will be renamed from <pre>${this.plugin.settings.destinationF
                         destinationFolder: normalizePath(value),
                     }),
             );
+        });
+
+        this.repoDocRefreshTtlDaysSetting?.addText((text) => {
+            text.inputEl.setAttr("type", "number");
+            text.inputEl.setAttr("min", "1");
+            text.inputEl.setAttr("max", "365");
+            text.setValue(
+                this.plugin.settings.repoDocRefreshTtlDays.toString(),
+            ).onChange(async (value) =>
+                this.updateSettings({
+                    repoDocRefreshTtlDays: Number.parseInt(value),
+                }),
+            );
+        });
+
+        this.repoDocRequestConcurrencySetting?.addText((text) => {
+            text.inputEl.setAttr("type", "number");
+            text.inputEl.setAttr("min", "1");
+            text.inputEl.setAttr("max", "15");
+            text.setValue(
+                this.plugin.settings.repoDocRequestConcurrency.toString(),
+            ).onChange(async (value) =>
+                this.updateSettings({
+                    repoDocRequestConcurrency: Number.parseInt(value),
+                }),
+            );
+        });
+
+        this.updateRepoPagesAfterRepoDocFetchSetting?.addToggle((toggle) => {
+            toggle
+                .setValue(this.plugin.settings.updateRepoPagesAfterRepoDocFetch)
+                .onChange(async (value) =>
+                    this.updateSettings({
+                        updateRepoPagesAfterRepoDocFetch: value,
+                    }),
+                );
         });
     }
 

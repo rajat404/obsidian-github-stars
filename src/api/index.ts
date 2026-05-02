@@ -8,8 +8,14 @@ import type { GitHub } from "@/types";
 import { getOrCreateFile, getOrCreateFolder } from "@/utils";
 import { Stream, set } from "itertools-ts";
 import { DateTime } from "luxon";
-import { ResultAsync, ok } from "neverthrow";
-import type { DataWriteOptions, FileManager, TFile, Vault } from "obsidian";
+import { ResultAsync, ok, okAsync } from "neverthrow";
+import type {
+    DataWriteOptions,
+    FileManager,
+    TAbstractFile,
+    TFile,
+    Vault,
+} from "obsidian";
 
 export const emptyPage = `<!-- GITHUB-STARS-START -->
 
@@ -17,6 +23,12 @@ export const emptyPage = `<!-- GITHUB-STARS-START -->
 
 ---
 `;
+
+export type RepoPageMoveStats = {
+    moved: number;
+    skipped: number;
+    conflicts: number;
+};
 
 export class GithubStarsPluginApi {
     private vault: Vault;
@@ -365,5 +377,84 @@ export class GithubStarsPluginApi {
         return ResultAsync.combine(results).andThen(() =>
             ok({ createdPages, updatedPages }),
         );
+    }
+
+    public restoreArchivedRepoPages(
+        repos: GitHub.Repository[],
+        activeFolder: string,
+        archivedFolder: string,
+    ): ResultAsync<RepoPageMoveStats, PluginError<Code.Any>> {
+        return this.moveRepoPages({
+            repos,
+            fromFolder: archivedFolder,
+            toFolder: activeFolder,
+        });
+    }
+
+    public archiveRepoPages(
+        repos: GitHub.Repository[],
+        activeFolder: string,
+        archivedFolder: string,
+    ): ResultAsync<RepoPageMoveStats, PluginError<Code.Any>> {
+        return this.moveRepoPages({
+            repos,
+            fromFolder: activeFolder,
+            toFolder: archivedFolder,
+        });
+    }
+
+    private moveRepoPages({
+        repos,
+        fromFolder,
+        toFolder,
+    }: {
+        repos: GitHub.Repository[];
+        fromFolder: string;
+        toFolder: string;
+    }): ResultAsync<RepoPageMoveStats, PluginError<Code.Any>> {
+        const stats: RepoPageMoveStats = {
+            moved: 0,
+            skipped: 0,
+            conflicts: 0,
+        };
+
+        const moves = repos.map((repo) => {
+            const fromPath = `${fromFolder}/${repo.owner.login}/${repo.name}.md`;
+            const toPath = `${toFolder}/${repo.owner.login}/${repo.name}.md`;
+            const fromFile = this.vault.getFileByPath(fromPath);
+            const toFile = this.vault.getFileByPath(toPath);
+
+            if (!fromFile && !toFile) {
+                stats.skipped += 1;
+                return okAsync();
+            }
+
+            if (!fromFile && toFile) {
+                stats.skipped += 1;
+                return okAsync();
+            }
+
+            if (fromFile && toFile) {
+                stats.conflicts += 1;
+                return okAsync();
+            }
+
+            return getOrCreateFolder(
+                this.vault,
+                `${toFolder}/${repo.owner.login}`,
+            )
+                .andThen(() =>
+                    ResultAsync.fromThrowable(
+                        (file: TAbstractFile, path: string) =>
+                            this.vault.rename(file, path),
+                        () => new PluginError(Code.Api.ProcessingFailed),
+                    )(fromFile as TFile, toPath),
+                )
+                .andTee(() => {
+                    stats.moved += 1;
+                });
+        });
+
+        return ResultAsync.combine(moves).map(() => stats);
     }
 }
