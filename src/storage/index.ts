@@ -207,6 +207,10 @@ export class PluginStorage {
                     }
 
                     if (!repo.isPrivate && readmeGetter) {
+                        logInfo("README fetch start for repository", {
+                            repository: repo.url.toString(),
+                            importedCount: importedReposIds.size,
+                        });
                         const readmeResult = await readmeGetter(repo);
                         if (readmeResult.isOk()) {
                             readmeUpdateMode = "set";
@@ -216,13 +220,25 @@ export class PluginStorage {
                                 readme = readmeResult.value;
                                 readmeFetchedAt = now.toISO();
                             }
+                            logInfo("README fetch completed for repository", {
+                                repository: repo.url.toString(),
+                                importedCount: importedReposIds.size,
+                                hasReadme: Boolean(readmeResult.value),
+                                readmeLength: readmeResult.value?.length ?? 0,
+                            });
                         } else {
                             readmeFetchFailures += 1;
                             logWarn("README fetch failed for repository", {
                                 repository: repo.url.toString(),
+                                importedCount: importedReposIds.size,
                                 code: readmeResult.error.code,
                             });
                         }
+                    } else if (repo.isPrivate) {
+                        logInfo("README fetch skipped for private repository", {
+                            repository: repo.url.toString(),
+                            importedCount: importedReposIds.size,
+                        });
                     }
 
                     if (repo.licenseInfo?.spdxId) {

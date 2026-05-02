@@ -113,7 +113,12 @@ export default class GithubStarsPlugin extends Plugin {
                 const result = await this.lock.run(() => {
                     const doImportDataToStorage = ResultAsync.fromPromise(
                         this.importDataToStorage(config),
-                        () => new PluginError(Code.Api.ImportFailed),
+                        (error) => {
+                            logError("importDataToStorage promise rejected", {
+                                error: String(error),
+                            });
+                            return new PluginError(Code.Api.ImportFailed);
+                        },
                     ).andThen((result) => {
                         if (result.isErr()) {
                             return err(result.error);
@@ -532,7 +537,10 @@ export default class GithubStarsPlugin extends Plugin {
         const oldSettings = structuredClone(this.settings);
         const result = await this.lock.run(() => {
             return this.saveSettings(settings).andThrough(() => {
-                if (isUndefined(settings.destinationFolder)) {
+                if (
+                    isUndefined(settings.destinationFolder) ||
+                    settings.destinationFolder === oldSettings.destinationFolder
+                ) {
                     return okAsync();
                 }
                 return this.renameDestinationFolder(

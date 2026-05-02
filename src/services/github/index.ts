@@ -1,5 +1,5 @@
 import { Code, PluginError } from "@/errors";
-import { logWarn } from "@/logger";
+import { logInfo, logWarn } from "@/logger";
 import { type Result, ResultAsync } from "neverthrow";
 import { requestUrl } from "obsidian";
 import starredRepositoriesQuery from "./queries/starredRepositories.gql";
@@ -10,6 +10,7 @@ const GITHUB_GRAPHQL_URL = "https://api.github.com/graphql";
 const GITHUB_API_URL = "https://api.github.com";
 const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 const MAX_RETRIES = 5;
+const REQUEST_TIMEOUT_MS = 30_000;
 
 export interface StarredRepositoriesQueryResult {
     repositories: GitHubGraphQl.StarredRepositoryEdge[];
@@ -64,15 +65,40 @@ export class GithubRepositoriesService implements IGithubRepositoriesService {
         body?: string;
     }) {
         let lastResponse: Awaited<ReturnType<typeof requestUrl>> | undefined;
+        let lastError: unknown;
 
         for (let attempt = 1; attempt <= MAX_RETRIES; attempt += 1) {
-            const response = await requestUrl({
-                url: request.url,
-                method: request.method,
-                headers: this.headers,
-                body: request.body,
-                throw: false,
-            });
+            let response: Awaited<ReturnType<typeof requestUrl>>;
+            try {
+                response = await this.withTimeout(
+                    requestUrl({
+                        url: request.url,
+                        method: request.method,
+                        headers: this.headers,
+                        body: request.body,
+                        throw: false,
+                    }),
+                    REQUEST_TIMEOUT_MS,
+                );
+            } catch (error) {
+                lastError = error;
+
+                if (attempt === MAX_RETRIES) {
+                    throw error;
+                }
+
+                const backoffMs = 1000 * 2 ** (attempt - 1);
+                logWarn("GitHub request failed before response; retrying", {
+                    url: request.url,
+                    method: request.method,
+                    attempt,
+                    backoffMs,
+                    error: String(error),
+                });
+                await this.sleep(backoffMs);
+                continue;
+            }
+
             lastResponse = response;
 
             if (!RETRYABLE_STATUS_CODES.has(response.status)) {
@@ -93,14 +119,46 @@ export class GithubRepositoriesService implements IGithubRepositoriesService {
 
             logWarn("GitHub request retry scheduled", {
                 url: request.url,
+                method: request.method,
                 status: response.status,
                 attempt,
                 backoffMs,
             });
-            await new Promise((resolve) => setTimeout(resolve, backoffMs));
+            await this.sleep(backoffMs);
+        }
+
+        if (lastError) {
+            throw lastError;
         }
 
         return lastResponse;
+    }
+
+    private async withTimeout<T>(
+        promise: Promise<T>,
+        timeoutMs: number,
+    ): Promise<T> {
+        let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            timeoutHandle = setTimeout(() => {
+                reject(
+                    new Error(`GitHub request timed out after ${timeoutMs}ms`),
+                );
+            }, timeoutMs);
+        });
+
+        try {
+            return await Promise.race([promise, timeoutPromise]);
+        } finally {
+            if (timeoutHandle) {
+                clearTimeout(timeoutHandle);
+            }
+        }
+    }
+
+    private sleep(ms: number): Promise<void> {
+        return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
     private graphqlRequest<T>(
@@ -176,7 +234,14 @@ export class GithubRepositoriesService implements IGithubRepositoriesService {
     ): StarredRepositoriesGenerator {
         let after = "";
         let hasNextPage = false;
+        let page = 0;
         do {
+            page += 1;
+            logInfo("GitHub starred repositories page request start", {
+                page,
+                pageSize,
+                hasCursor: Boolean(after),
+            });
             const requestResult = await this.getOnePageOfStarredRepos(
                 after,
                 pageSize,
@@ -184,8 +249,21 @@ export class GithubRepositoriesService implements IGithubRepositoriesService {
             const result = requestResult.map((data) => {
                 hasNextPage = data.hasNextPage;
                 after = data.endCursor ? data.endCursor : "";
+                logInfo("GitHub starred repositories page request completed", {
+                    page,
+                    receivedCount: data.repositories.length,
+                    totalCount: data.totalCount,
+                    hasNextPage: data.hasNextPage,
+                    hasEndCursor: Boolean(data.endCursor),
+                });
                 return data.repositories;
             });
+            if (result.isErr()) {
+                logWarn("GitHub starred repositories page request failed", {
+                    page,
+                    code: result.error.code,
+                });
+            }
             yield result;
         } while (hasNextPage);
     }
@@ -205,6 +283,7 @@ export class GithubRepositoriesService implements IGithubRepositoriesService {
     ): ResultAsync<string | undefined, PluginError<Code.GithubService>> {
         return ResultAsync.fromPromise(
             (async () => {
+                logInfo("GitHub README request start", { owner, repo });
                 const response = await this.requestWithRetry({
                     url: `${GITHUB_API_URL}/repos/${owner}/${repo}/readme`,
                     method: "GET",
@@ -217,6 +296,7 @@ export class GithubRepositoriesService implements IGithubRepositoriesService {
                 }
 
                 if (response.status === 404) {
+                    logInfo("GitHub README not found", { owner, repo });
                     return undefined;
                 }
 
@@ -232,16 +312,36 @@ export class GithubRepositoriesService implements IGithubRepositoriesService {
 
                 const data = response.json as GitHubRest.ReadmeResponse;
                 if (!data.content) {
+                    logInfo("GitHub README response had no content", {
+                        owner,
+                        repo,
+                        status: response.status,
+                    });
                     return undefined;
                 }
 
                 if (data.encoding === "base64") {
-                    return Buffer.from(
+                    const decoded = Buffer.from(
                         data.content.replaceAll("\n", ""),
                         "base64",
                     ).toString("utf-8");
+                    logInfo("GitHub README request completed", {
+                        owner,
+                        repo,
+                        status: response.status,
+                        encoding: data.encoding,
+                        contentLength: decoded.length,
+                    });
+                    return decoded;
                 }
 
+                logInfo("GitHub README request completed", {
+                    owner,
+                    repo,
+                    status: response.status,
+                    encoding: data.encoding,
+                    contentLength: data.content.length,
+                });
                 return data.content;
             })(),
             () => new PluginError(Code.GithubService.RequestFailed),
