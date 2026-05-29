@@ -33,8 +33,8 @@ Primary fork goals:
 - Installed plugin dir: `.obsidian/plugins/github-stars` inside the target vault
 - Plugin debug log: `.obsidian/plugins/github-stars/debug.log` inside the target vault
 - Synced database: `GitHub/db/stars.db` inside the target vault
-- qmd collection for Rajat's vault: `github-stars`
-- qmd config: `/Users/rajat/.config/qmd/index.yml`
+- Star Search CLI for Rajat's vault: `/Users/rajat/.local/bin/star-search`
+- Star Search repo: `/Users/rajat/selfpro/star-search`
 
 ## Build and install
 
@@ -82,12 +82,11 @@ Loaded command IDs:
 obsidian vault="<vault-name>" eval code='Object.keys(app.commands.commands).filter((id) => id.startsWith("github-stars:")).sort().join("\n")'
 ```
 
-qmd search validation for Rajat's vault:
+Star Search validation for Rajat's vault:
 
 ```bash
-qmd status
-qmd search "kubernetes dashboard" -c github-stars -n 5
-qmd query "tools for searching local markdown notes" -c github-stars -n 5
+star-search search "kubernetes dashboard" --term cluster --limit 5
+star-search search "tools for searching local markdown notes" --term sqlite --term full-text --limit 5
 ```
 
 ## Known successful state
@@ -96,8 +95,7 @@ Validated successful command-split sync in Rajat's vault on 2026-05-02:
 - `1325` active repositories in SQLite
 - `1324` repositories with repo-doc check completed
 - `1322` repositories with repo-doc content
-- qmd collection `github-stars` indexing `1337` repo-pages
-- qmd vectors complete: `11231` embedded chunks
+- Star Search indexed `1421` repositories and `1433` repo-pages on 2026-05-29
 
 At that validation point, repos without repo-doc content were:
 - `LANDrop/LANDrop-releases`

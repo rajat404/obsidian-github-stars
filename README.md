@@ -181,24 +181,23 @@ topics: <list of topics>
 ---
 ```
 
-#### qmd search for Rajat's vault
+#### Star Search for Rajat's vault
 
-Rajat's vault is indexed by qmd for local search across generated repo-pages, including archived/unstarred repo-pages:
-
-```bash
-qmd status
-qmd search "kubernetes dashboard" -c github-stars -n 5
-qmd vsearch "local first markdown search" -c github-stars -n 5
-qmd query "tools for searching local markdown notes" -c github-stars -n 5
-qmd get qmd://github-stars/repositories/tobi/qmd.md -l 40
-```
-
-After sync/archive changes, refresh qmd:
+Rajat's vault is searched with Star Search across generated repo-pages, including archived/unstarred repo-pages:
 
 ```bash
-qmd update
-qmd embed --max-docs-per-batch 10 --max-batch-mb 5
+star-search search "kubernetes dashboard" --term cluster --limit 5
+star-search search "local first markdown search" --term sqlite --term full-text --limit 5
+star-search search "tobi/qmd" --limit 3
 ```
+
+Use direct Markdown search as a fallback for exact strings and surrounding context:
+
+```bash
+rg -n "kubernetes dashboard|local first markdown search|sqlite full-text" /Users/rajat/github-stars/GitHub/repositories /Users/rajat/github-stars/GitHub/unstarred
+```
+
+Star Search is installed at `/Users/rajat/.local/bin/star-search` and rebuilds/reuses its SQLite FTS5 sidecar automatically after sync/archive changes.
 
 #### Debug logging
 
