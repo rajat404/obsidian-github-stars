@@ -29,7 +29,7 @@ Primary fork goals:
 ## Important paths
 
 - Fork repo: `.`
-- Live vault: `../github-stars` or the active Obsidian vault where the plugin is installed
+- Live vault: `/Users/rajat/vaults/github/stars` or the active Obsidian vault where the plugin is installed
 - Installed plugin dir: `.obsidian/plugins/github-stars` inside the target vault
 - Plugin debug log: `.obsidian/plugins/github-stars/debug.log` inside the target vault
 - Synced database: `GitHub/db/stars.db` inside the target vault
