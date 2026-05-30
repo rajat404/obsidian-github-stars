@@ -194,7 +194,7 @@ star-search search "tobi/qmd" --limit 3
 Use direct Markdown search as a fallback for exact strings and surrounding context:
 
 ```bash
-rg -n "kubernetes dashboard|local first markdown search|sqlite full-text" /Users/rajat/github-stars/GitHub/repositories /Users/rajat/github-stars/GitHub/unstarred
+rg -n "kubernetes dashboard|local first markdown search|sqlite full-text" /Users/rajat/vaults/github/stars/GitHub/repositories /Users/rajat/vaults/github/stars/GitHub/unstarred
 ```
 
 Star Search is installed at `/Users/rajat/.local/bin/star-search` and rebuilds/reuses its SQLite FTS5 sidecar automatically after sync/archive changes.
