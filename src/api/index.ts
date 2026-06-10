@@ -33,8 +33,8 @@ export type RepoPageMoveStats = {
 export class GithubStarsPluginApi {
     private vault: Vault;
     private fileManager: FileManager;
-    private placeHolderRegex =
-        /(<!-- GITHUB-STARS-START -->\s)([\s\S]*?)(\s<!-- GITHUB-STARS-END -->)/gm;
+    private readonly managedContentStart = "<!-- GITHUB-STARS-START -->";
+    private readonly managedContentEnd = "<!-- GITHUB-STARS-END -->";
 
     constructor(vault: Vault, fileManager: FileManager) {
         this.vault = vault;
@@ -65,10 +65,17 @@ export class GithubStarsPluginApi {
     }
 
     private updateDataWithNewContent(data: string, newContent: string): string {
-        return data.replace(
-            this.placeHolderRegex,
-            (_match, p1, _p2, p3) => `${p1}${newContent}${p3}`,
-        );
+        const startIndex = data.indexOf(this.managedContentStart);
+        const endIndex = data.lastIndexOf(this.managedContentEnd);
+
+        if (startIndex === -1 || endIndex === -1 || endIndex < startIndex) {
+            return data;
+        }
+
+        const contentStart = startIndex + this.managedContentStart.length;
+        return `${data.slice(0, contentStart)}\n${newContent}\n${data.slice(
+            endIndex,
+        )}`;
     }
 
     public createOrUpdateIndexPageByDays(

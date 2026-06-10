@@ -121,7 +121,8 @@ Name of the folder is set to "GitHub" by default, but you can change it in the p
 
 #### Commands
 
-- `GitHub stars: Sync starred repositories` syncs starred repository metadata and regenerates repo-pages/index-pages without fetching repo-docs.
+- `GitHub stars: Sync starred repositories` performs full starred repository metadata reconciliation, marks unstarred repositories, and regenerates repo-pages/index-pages without fetching repo-docs.
+- `GitHub stars: Sync new starred repositories` imports only new starred repository metadata up to the current DB head repo, then regenerates repo-pages/index-pages. It does not mark unstarred repositories.
 - `GitHub stars: Fetch missing repo-docs` fetches repo-docs that have never been checked.
 - `GitHub stars: Refresh stale repo-docs` refreshes repo-docs older than the configured TTL.
 - `GitHub stars: Refresh all repo-docs` refreshes all eligible repo-docs.
@@ -188,7 +189,6 @@ Rajat's vault is searched with Star Search across generated repo-pages, includin
 ```bash
 star-search search "kubernetes dashboard" --term cluster --limit 5
 star-search search "local first markdown search" --term sqlite --term full-text --limit 5
-star-search search "tobi/qmd" --limit 3
 ```
 
 Use direct Markdown search as a fallback for exact strings and surrounding context:

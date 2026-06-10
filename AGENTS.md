@@ -82,6 +82,11 @@ Loaded command IDs:
 obsidian vault="<vault-name>" eval code='Object.keys(app.commands.commands).filter((id) => id.startsWith("github-stars:")).sort().join("\n")'
 ```
 
+Metadata sync commands:
+
+- `github-stars:sync-stars` performs full reconciliation and is the only sync path that marks unstarred repositories.
+- `github-stars:sync-stars-incremental` imports only new starred repositories up to the current DB head repo and must not mark unstarred repositories.
+
 Star Search validation for Rajat's vault:
 
 ```bash

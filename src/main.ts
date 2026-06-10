@@ -18,7 +18,11 @@ import {
 import { GithubRepositoriesService } from "@/services/github";
 import { DEFAULT_SETTINGS, type PluginSettings, SettingsTab } from "@/settings";
 import { StatusBar, StatusBarAction } from "@/statusBar";
-import { type ImportConfig, PluginStorage } from "@/storage";
+import {
+    type ImportConfig,
+    type ImportSummary,
+    PluginStorage,
+} from "@/storage";
 import type { GitHub } from "@/types";
 import { PluginLock, getOrCreateFolder, renameFolder } from "@/utils";
 import Handlebars from "handlebars";
@@ -32,6 +36,8 @@ import {
     okAsync,
 } from "neverthrow";
 import { type App, Notice, Plugin, type PluginManifest } from "obsidian";
+
+type StarSyncMode = "full" | "incremental";
 
 export default class GithubStarsPlugin extends Plugin {
     storage: PluginStorage;
@@ -77,7 +83,13 @@ export default class GithubStarsPlugin extends Plugin {
         this.addCommand({
             id: "sync-stars",
             name: "Sync starred repositories",
-            callback: async () => await this.syncStars(),
+            callback: async () => await this.syncStarsWithMode("full"),
+        });
+
+        this.addCommand({
+            id: "sync-stars-incremental",
+            name: "Sync new starred repositories",
+            callback: async () => await this.syncStarsWithMode("incremental"),
         });
 
         this.addCommand({
@@ -211,39 +223,86 @@ export default class GithubStarsPlugin extends Plugin {
         );
     }
 
-    private async syncStars() {
-        const config: ImportConfig = {
-            fullSync: true,
-            removeUnstarred: false,
-            lastRepoId: undefined,
-        };
+    private syncCommandName(mode: StarSyncMode) {
+        return mode === "full" ? "sync-stars" : "sync-stars-incremental";
+    }
 
-        await resetDebugLog("sync-stars command started");
-        logInfo("sync-stars configuration resolved", {
-            fullSync: config.fullSync,
-            removeUnstarred: config.removeUnstarred,
+    private resolveImportConfig(
+        mode: StarSyncMode,
+    ): ResultAsync<ImportConfig, PluginError<Code.Sqlite>> {
+        if (mode === "full") {
+            return okAsync({
+                fullSync: true,
+                removeUnstarred: false,
+                lastRepoId: undefined,
+            });
+        }
+
+        return this.storage.getStats().map((stats) => {
+            if (!stats.lastRepoId) {
+                logInfo(
+                    "incremental sync has no lastRepoId; falling back to full sync",
+                    {
+                        starredCount: stats.starredCount,
+                        unstarredCount: stats.unstarredCount,
+                    },
+                );
+                return {
+                    fullSync: true,
+                    removeUnstarred: false,
+                    lastRepoId: undefined,
+                };
+            }
+
+            return {
+                fullSync: false,
+                removeUnstarred: false,
+                lastRepoId: stats.lastRepoId,
+            };
+        });
+    }
+
+    private async syncStarsWithMode(mode: StarSyncMode) {
+        const commandName = this.syncCommandName(mode);
+        const startedAt = DateTime.utc();
+
+        await resetDebugLog(`${commandName} command started`);
+        logInfo(`${commandName} requested`, {
+            mode,
             pageSize: this.settings.pageSize,
             destinationFolder: this.settings.destinationFolder,
         });
 
         const result = await this.lock.run(() => {
-            const doImportDataToStorage = ResultAsync.fromPromise(
-                this.importDataToStorage(config),
-                (error) => {
-                    logError("importDataToStorage promise rejected", {
-                        error: String(error),
-                    });
-                    return new PluginError(Code.Api.ImportFailed);
-                },
-            ).andThen((result) => {
-                if (result.isErr()) {
-                    return err(result.error);
-                }
-                return ok(result.value);
-            });
-
             return this.prepareStorage()
-                .andThen(() => doImportDataToStorage)
+                .andThen(() => this.resolveImportConfig(mode))
+                .andTee((config) => {
+                    logInfo(`${commandName} configuration resolved`, {
+                        mode,
+                        fullSync: config.fullSync,
+                        removeUnstarred: config.removeUnstarred,
+                        lastRepoId: config.lastRepoId,
+                        pageSize: this.settings.pageSize,
+                        destinationFolder: this.settings.destinationFolder,
+                    });
+                })
+                .andThen((config) =>
+                    ResultAsync.fromPromise(
+                        this.importDataToStorage(mode, config),
+                        (error) => {
+                            logError("importDataToStorage promise rejected", {
+                                mode,
+                                error: String(error),
+                            });
+                            return new PluginError(Code.Api.ImportFailed);
+                        },
+                    ).andThen((result) => {
+                        if (result.isErr()) {
+                            return err(result.error);
+                        }
+                        return ok(result.value);
+                    }),
+                )
                 .andThen(() => this.storage.getRepositories())
                 .andThrough((repos) =>
                     this.api.restoreArchivedRepoPages(
@@ -256,7 +315,7 @@ export default class GithubStarsPlugin extends Plugin {
                 .andTee(() => this.updateStats())
                 .andThrough(() => this.storage.close())
                 .orTee((error) => {
-                    logError("sync-stars pipeline failed", {
+                    logError(`${commandName} pipeline failed`, {
                         code: error.code,
                         name: error.name,
                         message: error.message,
@@ -266,9 +325,14 @@ export default class GithubStarsPlugin extends Plugin {
         });
 
         return result
-            .andTee(() => logInfo("sync-stars command completed successfully"))
+            .andTee(() =>
+                logInfo(`${commandName} command completed successfully`, {
+                    elapsedSeconds: DateTime.utc().diff(startedAt, "seconds")
+                        .seconds,
+                }),
+            )
             .orTee((error) => {
-                logError("sync-stars command failed", {
+                logError(`${commandName} command failed`, {
                     code: error.code,
                     name: error.name,
                     message: error.message,
@@ -415,15 +479,19 @@ export default class GithubStarsPlugin extends Plugin {
     }
 
     private async importDataToStorage(
+        mode: StarSyncMode,
         config: ImportConfig,
-    ): Promise<Result<void, PluginError<Code.Any>>> {
+    ): Promise<Result<ImportSummary, PluginError<Code.Any>>> {
         const service = new GithubRepositoriesService(
             this.settings.accessToken,
         );
+        const startedAt = DateTime.utc();
         logInfo("importDataToStorage start", {
+            mode,
             hasAccessToken: Boolean(this.settings.accessToken),
             pageSize: this.settings.pageSize,
             fullSync: config.fullSync,
+            lastRepoId: config.lastRepoId,
         });
         const totalCountResult =
             await service.getTotalStarredRepositoriesCount();
@@ -438,7 +506,7 @@ export default class GithubStarsPlugin extends Plugin {
         const totalCount = totalCountResult.value;
         logInfo("fetched total starred repositories count", { totalCount });
         new Notice(
-            `Start metadata sync of ${totalCount} GitHub stars (page size is ${this.settings.pageSize} items)…`,
+            `Start ${mode} metadata sync of ${totalCount} GitHub stars (page size is ${this.settings.pageSize} items)…`,
         );
 
         const statusBarAction = new StatusBarAction(
@@ -465,7 +533,18 @@ export default class GithubStarsPlugin extends Plugin {
         if (result.isOk()) {
             new Notice("Metadata sync of your GitHub stars was successful!");
             statusBarAction.done();
-            logInfo("importDataToStorage completed", { totalCount });
+            logInfo("importDataToStorage completed", {
+                mode,
+                totalCount,
+                pageSize: this.settings.pageSize,
+                fullSync: config.fullSync,
+                lastRepoId: config.lastRepoId,
+                importedCount: result.value.importedCount,
+                stoppedAtLastRepoId: result.value.stoppedAtLastRepoId,
+                readmeFetchFailures: result.value.readmeFetchFailures,
+                elapsedSeconds: DateTime.utc().diff(startedAt, "seconds")
+                    .seconds,
+            });
         } else {
             new Notice(
                 "ERROR. Metadata sync of your GitHub starred repositories failed!",
@@ -473,6 +552,7 @@ export default class GithubStarsPlugin extends Plugin {
             );
             statusBarAction.failed();
             logError("importDataToStorage failed", {
+                mode,
                 code: result.error.code,
                 name: result.error.name,
                 message: result.error.message,

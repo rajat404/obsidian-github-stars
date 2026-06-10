@@ -48,6 +48,12 @@ export type ImportConfig = {
     lastRepoId?: string;
 };
 
+export type ImportSummary = {
+    importedCount: number;
+    stoppedAtLastRepoId: boolean;
+    readmeFetchFailures: number;
+};
+
 export type RepositoryReadmeGetter = (
     repo: GitHub.Repository,
 ) => Promise<Result<string | undefined, PluginError<Code.GithubService>>>;
@@ -138,7 +144,7 @@ export class PluginStorage {
         config: ImportConfig,
         progressCallback: (count: number) => void,
         readmeGetter?: RepositoryReadmeGetter,
-    ): Promise<Result<void, PluginError<Code.Any>>> {
+    ): Promise<Result<ImportSummary, PluginError<Code.Any>>> {
         if (this.db.instance.isErr()) {
             return err(this.db.instance.error);
         }
@@ -160,12 +166,18 @@ export class PluginStorage {
         const importedReposIds: Set<string> = new Set();
         let readmeFetchFailures = 0;
 
-        let result: Result<void, PluginError<Code.Any>> = ok();
+        let result: Result<ImportSummary, PluginError<Code.Any>>;
         let stopImport = false;
         try {
             logInfo("storage import transaction start", {
                 fullSync: config.fullSync,
                 hasLastRepoId: Boolean(config.lastRepoId),
+                lastRepoId: config.lastRepoId,
+            });
+            result = ok({
+                importedCount: 0,
+                stoppedAtLastRepoId: false,
+                readmeFetchFailures: 0,
             });
             db.run("BEGIN TRANSACTION;");
             for await (const partResult of repositoriesGen) {
@@ -365,15 +377,21 @@ export class PluginStorage {
                 }
 
                 db.run("COMMIT;");
-                logInfo("storage import transaction committed", {
+                const summary = {
                     importedCount: importedReposIds.size,
+                    stoppedAtLastRepoId: stopImport,
                     readmeFetchFailures,
+                };
+                result = ok(summary);
+                logInfo("storage import transaction committed", {
+                    ...summary,
                 });
             } else {
                 db.run("ROLLBACK;");
                 logError("storage import rolled back", {
                     code: result.error.code,
                     importedCount: importedReposIds.size,
+                    stoppedAtLastRepoId: stopImport,
                     readmeFetchFailures,
                 });
             }
@@ -393,7 +411,9 @@ export class PluginStorage {
             removeRepositoriesTopicsStmt.free();
             upsertRepositoriesTopicsStmt.free();
         }
-        return result.asyncAndThen(() => this.db.save());
+        return result.asyncAndThen((summary) =>
+            this.db.save().map(() => summary),
+        );
     }
 
     public getStats(): ResultAsync<Stats, PluginError<Code.Sqlite>> {

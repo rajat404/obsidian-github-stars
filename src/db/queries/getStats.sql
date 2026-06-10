@@ -1,10 +1,17 @@
-SELECT COUNT(id) FILTER (
+SELECT (
+    SELECT COUNT(id)
+    FROM repositories
     WHERE unstarredAt IS NULL
   ) AS starredCount,
-  COUNT(id) FILTER (
+  (
+    SELECT COUNT(id)
+    FROM repositories
     WHERE unstarredAt IS NOT NULL
   ) AS unstarredCount,
-  id AS lastRepoId
-FROM repositories
-ORDER BY starredAt DESC
-LIMIT 1;
+  (
+    SELECT id
+    FROM repositories
+    WHERE unstarredAt IS NULL
+    ORDER BY starredAt DESC
+    LIMIT 1
+  ) AS lastRepoId;
