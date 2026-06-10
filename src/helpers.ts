@@ -59,3 +59,11 @@ export const isMatch = <T extends Record<string, unknown>>(
 
     return true;
 };
+
+export const repoPageFileStem = (repoName: string): string => {
+    if (!repoName.startsWith(".")) {
+        return repoName;
+    }
+
+    return `dot-${repoName.replace(/^\.+/, "")}`;
+};

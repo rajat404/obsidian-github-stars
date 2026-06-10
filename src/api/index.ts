@@ -1,5 +1,5 @@
 import { Code, PluginError } from "@/errors";
-import { isNull, isUndefined } from "@/helpers";
+import { isNull, isUndefined, repoPageFileStem } from "@/helpers";
 import indexPageByDaysTemplate from "@/templates/indexPageByDays.hbs";
 import indexPageByLanguagesTemplate from "@/templates/indexPageByLanguages.hbs";
 import indexPageByOwnersTemplate from "@/templates/indexPageByOwners.hbs";
@@ -352,7 +352,7 @@ export class GithubStarsPluginApi {
                 .andThen((folder) =>
                     getOrCreateFile(
                         this.vault,
-                        `${folder.path}/${repo.name}.md`,
+                        `${folder.path}/${repoPageFileStem(repo.name)}.md`,
                         emptyPage,
                     ),
                 )
@@ -419,8 +419,9 @@ export class GithubStarsPluginApi {
         };
 
         const moves = repos.map((repo) => {
-            const fromPath = `${fromFolder}/${repo.owner.login}/${repo.name}.md`;
-            const toPath = `${toFolder}/${repo.owner.login}/${repo.name}.md`;
+            const repoPageFileName = `${repoPageFileStem(repo.name)}.md`;
+            const fromPath = `${fromFolder}/${repo.owner.login}/${repoPageFileName}`;
+            const toPath = `${toFolder}/${repo.owner.login}/${repoPageFileName}`;
             const fromFile = this.vault.getFileByPath(fromPath);
             const toFile = this.vault.getFileByPath(toPath);
 

@@ -15,7 +15,7 @@
 {{#each reposOfOrgs}}
 ### {{this.[0]}}
 {{#each this.[1]}}
-- {{#if this.unstarredAt}}~~{{/if}}[[{{@root.repostioriesFolder}}/{{this.owner.login}}/{{this.name}}|{{this.name}}]]{{#if this.description}}. {{this.description}}{{/if}}{{#if this.unstarredAt}}~~ *(unstarred at {{dateFormat this.unstarredAt "ff"}})*{{/if}}
+- {{#if this.unstarredAt}}~~{{/if}}[[{{@root.repostioriesFolder}}/{{this.owner.login}}/{{repoPageFileStem this.name}}|{{this.name}}]]{{#if this.description}}. {{this.description}}{{/if}}{{#if this.unstarredAt}}~~ *(unstarred at {{dateFormat this.unstarredAt "ff"}})*{{/if}}
 {{/each}}
 {{/each}}
 
@@ -23,6 +23,6 @@
 {{#each reposOfUsers}}
 ### {{this.[0]}}
 {{#each this.[1]}}
-- {{#if this.unstarredAt}}~~{{/if}}[[{{@root.repostioriesFolder}}/{{this.owner.login}}/{{this.name}}|{{this.name}}]]{{#if this.description}}. {{this.description}}{{/if}}{{#if this.unstarredAt}}~~ *(unstarred at {{dateFormat this.unstarredAt "ff"}})*{{/if}}
+- {{#if this.unstarredAt}}~~{{/if}}[[{{@root.repostioriesFolder}}/{{this.owner.login}}/{{repoPageFileStem this.name}}|{{this.name}}]]{{#if this.description}}. {{this.description}}{{/if}}{{#if this.unstarredAt}}~~ *(unstarred at {{dateFormat this.unstarredAt "ff"}})*{{/if}}
 {{/each}}
 {{/each}}

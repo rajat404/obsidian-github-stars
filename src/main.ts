@@ -1,7 +1,13 @@
 import { GithubStarsPluginApi } from "@/api";
 import { SqliteDatabase } from "@/db/sqlite";
 import { Code, PluginError } from "@/errors";
-import { isEmpty, isMatch, isNull, isUndefined } from "@/helpers";
+import {
+    isEmpty,
+    isMatch,
+    isNull,
+    isUndefined,
+    repoPageFileStem,
+} from "@/helpers";
 import { configureLogger, logError, logInfo, resetDebugLog } from "@/logger";
 import { confirm } from "@/modals";
 import {
@@ -174,12 +180,14 @@ export default class GithubStarsPlugin extends Plugin {
                 return searchUrl.toString();
             },
         );
+        Handlebars.registerHelper("repoPageFileStem", repoPageFileStem);
     }
 
     private unregisterHandlebarsHelpers() {
         Handlebars.unregisterHelper("dateFormat");
         Handlebars.unregisterHelper("dateFormatFromMillis");
         Handlebars.unregisterHelper("searchLanguageUrl");
+        Handlebars.unregisterHelper("repoPageFileStem");
     }
 
     private prepareStorage(): ResultAsync<

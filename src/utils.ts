@@ -33,7 +33,11 @@ export function getOrCreateFolder(
 
     return ResultAsync.fromThrowable(
         (p: string) => vault.createFolder(p),
-        () => new PluginError(Code.Vault.CreateFolderFailed),
+        (error) =>
+            new PluginError(
+                Code.Vault.CreateFolderFailed,
+                `path=${path}; cause=${error instanceof Error ? error.message : String(error)}`,
+            ),
     )(path);
 }
 
@@ -53,7 +57,11 @@ export function getOrCreateFile(
 
     const createFile = ResultAsync.fromThrowable(
         (p: string, d: string, o?: DataWriteOptions) => vault.create(p, d, o),
-        () => new PluginError(Code.Vault.CreateFileFailed),
+        (error) =>
+            new PluginError(
+                Code.Vault.CreateFileFailed,
+                `path=${path}; cause=${error instanceof Error ? error.message : String(error)}`,
+            ),
     );
 
     return createFile(path, content, options).map((file) => {
